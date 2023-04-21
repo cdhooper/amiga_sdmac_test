@@ -1,10 +1,10 @@
 /*
- * SDMAC  Version 0.2 2022-09-17
+ * SDMAC  Version 0.3 2023-03-28
  * -----------------------------
  * Utility to inspect and test an Amiga 3000's Super DMAC (SDMAC),
  * WD SCSI controller for correct configuration and operation.
  *
- * Copyright 2022 Chris Hooper.  This program and source may be used
+ * Copyright 2023 Chris Hooper.  This program and source may be used
  * and distributed freely, for any purpose which benefits the Amiga
  * community. Commercial use of the binary, source, or algorithms requires
  * prior written or email approval from Chris Hooper <amiga@cdh.eebugs.com>.
@@ -14,7 +14,7 @@
  * THE AUTHOR ASSUMES NO LIABILITY FOR ANY DAMAGE ARISING OUT OF THE USE
  * OR MISUSE OF THIS UTILITY OR INFORMATION REPORTED BY THIS UTILITY.
  */
-const char *version = "\0$VER: SDMAC 0.2 ("__DATE__") © Chris Hooper";
+const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") © Chris Hooper";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -130,7 +130,7 @@ extern struct ExecBase *SysBase;
 
 typedef unsigned int uint;
 
-#undef DUMP_WORDS_AND_LONGS
+#define DUMP_WORDS_AND_LONGS
 #ifdef DUMP_WORDS_AND_LONGS
 static uint32_t regs_l[0x20];
 static uint16_t regs_w[0x40];
@@ -172,7 +172,7 @@ dump_values(void *addr, uint length)
 }
 
 static void
-dump_raw_regs(void)
+dump_raw_sdmac_regs(void)
 {
 #ifdef DUMP_WORDS_AND_LONGS
     printf("\nSDMAC registers as 32-bit reads\n");
@@ -530,7 +530,7 @@ show_regs(void)
 {
     int pos;
     uint32_t value;
-    printf("REG VALUE    NAME          DESCRIPTION\n");
+    printf("\nREG VALUE    NAME          DESCRIPTION\n");
     for (pos = 0; pos < ARRAY_SIZE(sdmac_reglist); pos++) {
         if (sdmac_reglist[pos].type == WO)
             continue; // Skip this register
@@ -722,7 +722,7 @@ show_ramsey_config(void)
             printf(", refresh disabled\n");
             break;
     }
-    if (ramsey_control & (BIT(0) | BIT(1))) {
+    if (ramsey_control & (BIT(0) | BIT(1))) {  // Page or Burst mode
         printf("                     Static Column RAM required\n");
     }
 }
@@ -952,7 +952,7 @@ static uint32_t test_values[] = {
     0xf0f0f0f0, 0x0f0f0f0f,
 };
 
-static void
+static int
 test_ramsey_access(void)
 {
     int pos;
@@ -986,9 +986,10 @@ test_ramsey_access(void)
     SUPERVISOR_STATE_EXIT();
     if (errs == 0)
         printf("PASS\n");
+    return (errs);
 }
 
-static void
+static int
 test_sdmac_access(void)
 {
     int pos;
@@ -1021,9 +1022,10 @@ test_sdmac_access(void)
     INTERRUPTS_ENABLE();
     if (errs == 0)
         printf("PASS\n");
+    return (errs);
 }
 
-static void
+static int
 test_wdc_access(void)
 {
     int pos;
@@ -1109,23 +1111,44 @@ test_wdc_access(void)
 
     if (errs == 0)
         printf("PASS\n");
+    return (errs);
 }
 
 int
 main(int argc, char **argv)
 {
-    int raw = 0;
+    int raw_sdmac_regs = 0;
+    int all_regs = 0;
+    int loop_until_failure = 0;
     int arg;
 
     for (arg = 1; arg < argc; arg++) {
-        if (strcmp(argv[arg], "-r") == 0) {
-            raw++;
-        } else if (strcmp(argv[arg], "-v") == 0) {
-            printf("%s\n", version + 7);
-            exit(0);
+        char *ptr = argv[arg];
+        if (*ptr == '-') {
+            while (*(++ptr) != '\0') {
+                switch (*ptr) {
+                    case 'L':
+                        loop_until_failure++;
+                        break;
+                    case 'r':
+                        all_regs++;
+                        break;
+                    case 's':
+                        raw_sdmac_regs++;
+                        break;
+                    case 'v':
+                        printf("%s\n", version + 7);
+                        exit(0);
+                    default:
+                        goto usage;
+                }
+            }
         } else {
+usage:
             printf("Options:\n"
-                   "    -r Dump raw registers\n"
+                   "    -L Loop tests until failure\n"
+                   "    -r Display registers\n"
+                   "    -s Display raw SDMAC registers\n"
                    "    -v Display program version\n");
             exit(1);
         }
@@ -1138,15 +1161,20 @@ main(int argc, char **argv)
     show_wdc_config();
     printf("\n");
 
-    show_regs();
-    printf("\n");
-    test_ramsey_access();
-    test_sdmac_access();
-    test_wdc_access();
+    do {
+        if (test_ramsey_access() +
+            test_sdmac_access() +
+            test_wdc_access() > 0) {
+            break;
+        }
+    } while (loop_until_failure);
 
-    if (raw) {
+    if (all_regs) {
+        show_regs();
+    }
+    if (raw_sdmac_regs) {
         get_raw_regs();
-        dump_raw_regs();
+        dump_raw_sdmac_regs();
     }
 
     exit(0);
