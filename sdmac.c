@@ -14,7 +14,7 @@
  * THE AUTHOR ASSUMES NO LIABILITY FOR ANY DAMAGE ARISING OUT OF THE USE
  * OR MISUSE OF THIS UTILITY OR INFORMATION REPORTED BY THIS UTILITY.
  */
-const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") © Chris Hooper";
+const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") ï¿½ Chris Hooper";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,6 +51,11 @@ const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") © Chris Hooper";
 #define SDMAC_SCMD_B   0x00DD0047 // R/W    WDC SCMD (byte)
 #define SDMAC_SASRW    0x00DD0048 // Write  WDC SCSI register select (long)
 #define SDMAC_SASR_B2  0x00DD0049 // R/W    WDC SCSI auxiliary status (byte)
+
+#define SDMAC_CI       0x00DD0050 // R/W    Coprocessor Interface Register (long) 
+#define SDMAC_CIDDR    0x00DD0054 // R/W    Coprocessor Interface Data Direction Register (long) 
+#define SDMAC_SSPBDAT  0x00DD0058 // R/W    Synchronous Serial Peripheral Bus Data Register (long)
+#define SDMAC_SSPBCTL  0x00DD005C // R/W    Synchronous Serial Peripheral Bus Control Register (long)           
 
 #define SDMAC_WTC_ALT  (SDMAC_WTC +  0x80) // Shadow of SDMAC WTC
 #define RAMSEY_ACR_ALT (RAMSEY_ACR + 0x80) // Shadow of Ramsey ACR
@@ -103,6 +108,14 @@ const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") © Chris Hooper";
 #define SDMAC_CONTR_RESET  0x10 // Peripheral reset (Strobe)
 // #define SDMAC_CONTR_TCE    0x20 // Terminal count enable
 #define SDMAC_CONTR_DMAENA 0x80 // DMA Enabled
+
+/* Coprocessor Interface Register */
+
+/* Coprocessor Interface Data Direction Register */
+
+/* Synchronous Serial Peripheral Bus Data Register */
+
+/* Synchronous Serial Peripheral Bus Control Register */
 
 #define ADDR8(x)       (volatile uint8_t *)(x)
 #define ADDR16(x)      (volatile uint16_t *)(x)
@@ -217,6 +230,10 @@ static const reglist_t sdmac_reglist[] = {
     { SDMAC_SCMD,    BYTE, RW, "SDMAC_SCMD",    "WDC register data" },
     { SDMAC_SASRW,   LONG, WO, "SDMAC_SASRW",   "WDC register index" },
     { SDMAC_SASR_B2, BYTE, RW, "SDMAC_SASR_B",  "WDC register index" },
+    { SDMAC_CI,      LONG, RW, "SDMAC_CI",      "Coprocessor Interface Register" },
+    { SDMAC_CIDDR,   LONG, RW, "SDMAC_CIDDR",   "Coprocessor Interface Data Direction Register" },
+    { SDMAC_SSPBCTL, LONG, RW, "SDMAC_SSPBCTL", "Synchronous Serial Peripheral Bus Control Register"},
+    { SDMAC_SSPBDAT, LONG, RW, "SDMAC_SSPBDAT", "Synchronous Serial Peripheral Bus Data Register "},
 };
 
 static const reglist_t wd_reglist[] = {
@@ -577,11 +594,9 @@ show_regs(void)
     }
 }
 
-
-static int
-get_sdmac_version(char *reason)
+static void
+test_sdmac_wtc(char *reason)
 {
-    int rev = 0;
     int pass;
     uint32_t ovalue;
     uint32_t rvalue;
@@ -608,18 +623,71 @@ get_sdmac_version(char *reason)
         }
     }
 
-    /* Probe for version with some confidence that we're talking to SDMAC */
-    *ADDR32(SDMAC_WTC) = ovalue | BIT(2);
-    rvalue = *ADDR32(SDMAC_WTC);
-
-    if (rvalue & BIT(2))
-        rev = 2;  // SDMAC-02 WTC bit 2 is writable
-    else
-        rev = 4;  // SDMAC-04 WTC bit 2 is read-only
-fail:
+    fail:
     *ADDR32(SDMAC_WTC) = ovalue;
     INTERRUPTS_ENABLE();
 
+}
+
+static void
+test_sdmac_sspbctl(char *reason)
+{
+    int pass;
+    uint32_t ovalue;
+    uint32_t rvalue;
+    uint32_t wvalue;
+
+    INTERRUPTS_DISABLE();
+    ovalue = *ADDR32(SDMAC_SSPBCTL);
+
+    for (pass = 0; pass < 6; pass++) {
+        switch (pass) {
+            case 0: wvalue = 0x00000000;  break;
+            case 1: wvalue = 0x000000ff;  break;
+            case 2: wvalue = 0x000000a5;  break;
+            case 3: wvalue = 0x0000005a;  break;
+            case 4: wvalue = 0x000000c3;  break;
+            case 5: wvalue = 0x0000003c;  break;
+        }
+        *ADDR32(SDMAC_SSPBCTL) = wvalue;
+        (void) *ADDR32(SDMAC_CONTR);  // Push out write; buffer something else
+        rvalue = *ADDR32(SDMAC_SSPBCTL);
+        if ((rvalue & 0x000000ff) != wvalue) {
+            sprintf(reason, "SSPBCTL 0x%02x != 0x%02x", rvalue, wvalue);
+            goto fail;
+        }
+    }
+
+    fail:
+    *ADDR32(SDMAC_SSPBCTL) = ovalue;
+    INTERRUPTS_ENABLE();
+
+}
+
+static int
+get_sdmac_version(void)
+{
+    int rev = 0;
+    uint32_t ovalue;
+    uint32_t rvalue;
+     
+    INTERRUPTS_DISABLE();
+    ovalue = *ADDR32(SDMAC_WTC); 
+
+    /* Probe for SDMAC version */
+    *ADDR32(SDMAC_WTC) = ovalue | BIT(2);
+    rvalue = *ADDR32(SDMAC_WTC);
+
+    if (rvalue & BIT(2)){
+        rev = 2;  // SDMAC-02 WTC bit 2 is writable           
+    }
+    else{
+        rev = 4;  // SDMAC-04 WTC bit 2 is read-only
+    }        
+
+    *ADDR32(SDMAC_WTC) = ovalue;
+    INTERRUPTS_ENABLE();
+ 
     return (rev);
 }
 
@@ -671,6 +739,27 @@ show_ramsey_version(void)
     }
     printf("Memory controller:   Ramsey-0%d $%x\n", ramsey_rev, ramsey_version);
     return (0);
+}
+
+static int
+show_dmac_version(void)
+{
+    static char reason[32];
+    int sdmac_version = get_sdmac_version();
+
+    switch (sdmac_version) {
+        case 2:
+            test_sdmac_wtc(reason);
+            break;            
+        case 4:
+            //test_sdmac_sspbctl(reason);
+            break;
+        default:    
+            printf("Unrecognized SDMAC version -%02d\n", sdmac_version);
+            return (1);     
+    }  
+    printf("SCSI DMA Controller: SDMAC-%02d\n", sdmac_version);
+    return (0);         
 }
 
 static void
@@ -727,18 +816,7 @@ show_ramsey_config(void)
     }
 }
 
-static void
-show_dmac_version(void)
-{
-    int sdmac_ver;
-    static char reason[32];
-    sdmac_ver = get_sdmac_version(reason);
-    printf("SCSI DMA Controller: ");
-    if (sdmac_ver == 0)
-        printf("SDMAC version unknown: %s\n", reason);
-    else
-        printf("SDMAC-%02d\n", sdmac_ver);
-}
+
 
 #define LEVEL_WD33C93  0
 #define LEVEL_WD33C93A 1
@@ -1156,14 +1234,14 @@ usage:
 
     show_ramsey_version();
     show_ramsey_config();
-    show_dmac_version();
+    show_dmac_version();            
     show_wdc_version();
     show_wdc_config();
     printf("\n");
 
     do {
         if (test_ramsey_access() +
-            test_sdmac_access() +
+            //test_sdmac_access() +
             test_wdc_access() > 0) {
             break;
         }
