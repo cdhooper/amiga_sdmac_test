@@ -594,76 +594,6 @@ show_regs(void)
     }
 }
 
-static void
-test_sdmac_wtc(char *reason)
-{
-    int pass;
-    uint32_t ovalue;
-    uint32_t rvalue;
-    uint32_t wvalue;
-
-    INTERRUPTS_DISABLE();
-    ovalue = *ADDR32(SDMAC_WTC);
-
-    for (pass = 0; pass < 6; pass++) {
-        switch (pass) {
-            case 0: wvalue = 0x00000000 & ~BIT(2); break;
-            case 1: wvalue = 0x00ffffff & ~BIT(2); break;
-            case 2: wvalue = 0x00a5a5a5 & ~BIT(2); break;
-            case 3: wvalue = 0x005a5a5a & ~BIT(2); break;
-            case 4: wvalue = 0x00c3c3c3 & ~BIT(2); break;
-            case 5: wvalue = 0x003c3c3c & ~BIT(2); break;
-        }
-        *ADDR32(SDMAC_WTC) = wvalue;
-        (void) *ADDR32(SDMAC_CONTR);  // Push out write; buffer something else
-        rvalue = *ADDR32(SDMAC_WTC);
-        if ((rvalue & 0x00ffffff) != wvalue) {
-            sprintf(reason, "WTCL 0x%08x != 0x%08x", rvalue, wvalue);
-            goto fail;
-        }
-    }
-
-    fail:
-    *ADDR32(SDMAC_WTC) = ovalue;
-    INTERRUPTS_ENABLE();
-
-}
-
-static void
-test_sdmac_sspbctl(char *reason)
-{
-    int pass;
-    uint32_t ovalue;
-    uint32_t rvalue;
-    uint32_t wvalue;
-
-    INTERRUPTS_DISABLE();
-    ovalue = *ADDR32(SDMAC_SSPBCTL);
-
-    for (pass = 0; pass < 6; pass++) {
-        switch (pass) {
-            case 0: wvalue = 0x00000000;  break;
-            case 1: wvalue = 0x000000ff;  break;
-            case 2: wvalue = 0x000000a5;  break;
-            case 3: wvalue = 0x0000005a;  break;
-            case 4: wvalue = 0x000000c3;  break;
-            case 5: wvalue = 0x0000003c;  break;
-        }
-        *ADDR32(SDMAC_SSPBCTL) = wvalue;
-        (void) *ADDR32(SDMAC_CONTR);  // Push out write; buffer something else
-        rvalue = *ADDR32(SDMAC_SSPBCTL);
-        if ((rvalue & 0x000000ff) != wvalue) {
-            sprintf(reason, "SSPBCTL 0x%02x != 0x%02x", rvalue, wvalue);
-            goto fail;
-        }
-    }
-
-    fail:
-    *ADDR32(SDMAC_SSPBCTL) = ovalue;
-    INTERRUPTS_ENABLE();
-
-}
-
 static int
 get_sdmac_version(void)
 {
@@ -741,25 +671,26 @@ show_ramsey_version(void)
     return (0);
 }
 
+static int sdmac_version = 0;
+
 static int
 show_dmac_version(void)
 {
-    static char reason[32];
-    int sdmac_version = get_sdmac_version();
+   
+    sdmac_version = get_sdmac_version();    
 
     switch (sdmac_version) {
         case 2:
-            test_sdmac_wtc(reason);
-            break;            
+            printf("SCSI DMA Controller: SDMAC-%02d\n", sdmac_version);
+            return (0);                
         case 4:
-            //test_sdmac_sspbctl(reason);
-            break;
+            printf("SCSI DMA Controller: SDMAC-%02d\n", sdmac_version);
+            return (0);     
         default:    
             printf("Unrecognized SDMAC version -%02d\n", sdmac_version);
             return (1);     
     }  
-    printf("SCSI DMA Controller: SDMAC-%02d\n", sdmac_version);
-    return (0);         
+        
 }
 
 static void
@@ -1031,6 +962,69 @@ static uint32_t test_values[] = {
 };
 
 static int
+test_sdmac_wtc(void)
+{
+    int errs = 0;
+    int pos;
+    uint32_t ovalue;
+    uint32_t rvalue;
+    uint32_t wvalue;
+
+    INTERRUPTS_DISABLE();
+    ovalue = *ADDR32(SDMAC_WTC);
+    for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
+        wvalue = test_values[pos] & 0x00ffffff;
+        *ADDR32(SDMAC_WTC_ALT) = wvalue;
+        (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
+        rvalue = *ADDR32(SDMAC_WTC) & 0x00ffffff;
+        if (rvalue != wvalue) {
+            *ADDR32(SDMAC_WTC_ALT) = ovalue;
+            INTERRUPTS_ENABLE();
+            if (errs++ == 0)
+                printf("FAIL\n");
+            printf("  SDMAC WTC %08x != expected %08x\n", rvalue, wvalue);
+            INTERRUPTS_DISABLE();
+            ovalue = *ADDR32(SDMAC_WTC);
+        }
+    }
+    *ADDR32(SDMAC_WTC_ALT) = ovalue;
+    INTERRUPTS_ENABLE();
+    return (errs);
+}
+
+static int
+test_sdmac_sspbdat(void)
+{
+    int errs = 0;
+    int pos;
+    uint32_t ovalue;
+    uint32_t rvalue;
+    uint32_t wvalue;
+
+    INTERRUPTS_DISABLE();
+    ovalue = *ADDR32(SDMAC_SSPBDAT);
+    for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
+        wvalue = test_values[pos] & 0x000000ff;
+        *ADDR32(SDMAC_SSPBDAT) = wvalue;
+        (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
+        rvalue = *ADDR32(SDMAC_SSPBDAT) & 0x000000ff;
+        if (rvalue != wvalue) {
+            *ADDR32(SDMAC_SSPBDAT) = ovalue;
+            INTERRUPTS_ENABLE();
+            if (errs++ == 0)
+                printf("FAIL\n");
+            printf("  SDMAC SSPBDAT %02x != expected %02x\n", rvalue, wvalue);
+            INTERRUPTS_DISABLE();
+            ovalue = *ADDR32(SDMAC_SSPBDAT);
+        }
+    }
+    *ADDR32(SDMAC_SSPBDAT) = ovalue;
+    INTERRUPTS_ENABLE();
+    return (errs);
+
+}
+
+static int
 test_ramsey_access(void)
 {
     int pos;
@@ -1070,36 +1064,23 @@ test_ramsey_access(void)
 static int
 test_sdmac_access(void)
 {
-    int pos;
-    uint32_t ovalue;
-    uint32_t wvalue;
-    uint32_t rvalue;
     int errs = 0;
 
-    printf("SDMAC WTC test:  ");
+    printf("SDMAC Register test:  ");
     fflush(stdout);
 
-    INTERRUPTS_DISABLE();
-    ovalue = *ADDR32(SDMAC_WTC);
-    for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
-        wvalue = test_values[pos] & 0x00ffffff;
-        *ADDR32(SDMAC_WTC_ALT) = wvalue;
-        (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
-        rvalue = *ADDR32(SDMAC_WTC) & 0x00ffffff;
-        if (rvalue != wvalue) {
-            *ADDR32(SDMAC_WTC_ALT) = ovalue;
-            INTERRUPTS_ENABLE();
-            if (errs++ == 0)
-                printf("FAIL\n");
-            printf("  SDMAC WTC %08x != expected %08x\n", rvalue, wvalue);
-            INTERRUPTS_DISABLE();
-            ovalue = *ADDR32(SDMAC_WTC);
-        }
-    }
-    *ADDR32(SDMAC_WTC_ALT) = ovalue;
-    INTERRUPTS_ENABLE();
+    switch (sdmac_version) {
+        case 2:
+            errs = test_sdmac_wtc();
+            break;            
+        case 4:
+            errs = test_sdmac_sspbdat();
+            break;
+    }  
+
     if (errs == 0)
-        printf("PASS\n");
+        printf("PASS\n");    
+
     return (errs);
 }
 
@@ -1241,7 +1222,7 @@ usage:
 
     do {
         if (test_ramsey_access() +
-            //test_sdmac_access() +
+            test_sdmac_access() +
             test_wdc_access() > 0) {
             break;
         }
