@@ -52,10 +52,10 @@ const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") � Chris Hooper";
 #define SDMAC_SASRW    0x00DD0048 // Write  WDC SCSI register select (long)
 #define SDMAC_SASR_B2  0x00DD0049 // R/W    WDC SCSI auxiliary status (byte)
 
-#define SDMAC_CI       0x00DD0050 // R/W    Coprocessor Interface Register (long) 
-#define SDMAC_CIDDR    0x00DD0054 // R/W    Coprocessor Interface Data Direction Register (long) 
-#define SDMAC_SSPBDAT  0x00DD0058 // R/W    Synchronous Serial Peripheral Bus Data Register (long)
-#define SDMAC_SSPBCTL  0x00DD005C // R/W    Synchronous Serial Peripheral Bus Control Register (long)           
+#define SDMAC_CI       0x00DD0050 // R/W    Coproc. Interface (long)
+#define SDMAC_CIDDR    0x00DD0054 // R/W    Coproc. Interface Data Dir (long)
+#define SDMAC_SSPBDAT  0x00DD0058 // R/W    Sync. Serial Periph. Bus Data (long)
+#define SDMAC_SSPBCTL  0x00DD005C // R/W    Sync. Serial Periph. Bus Ctrl (long)
 
 #define SDMAC_WTC_ALT  (SDMAC_WTC +  0x80) // Shadow of SDMAC WTC
 #define RAMSEY_ACR_ALT (RAMSEY_ACR + 0x80) // Shadow of Ramsey ACR
@@ -130,10 +130,10 @@ const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") � Chris Hooper";
 /* Ramsey-07 requires the processor to be in Supervisor state */
 #define USE_SUPERVISOR_STATE
 #ifdef USE_SUPERVISOR_STATE
-#define SUPERVISOR_STATE_ENTER() { \
-                                   APTR old_stack = SuperState()
-#define SUPERVISOR_STATE_EXIT()    UserState(old_stack); \
-                                 }
+#define SUPERVISOR_STATE_ENTER()    { \
+                                        APTR old_stack = SuperState()
+#define SUPERVISOR_STATE_EXIT()         UserState(old_stack); \
+                                    }
 #else
 #define SUPERVISOR_STATE_ENTER()
 #define SUPERVISOR_STATE_EXIT()
@@ -230,10 +230,14 @@ static const reglist_t sdmac_reglist[] = {
     { SDMAC_SCMD,    BYTE, RW, "SDMAC_SCMD",    "WDC register data" },
     { SDMAC_SASRW,   LONG, WO, "SDMAC_SASRW",   "WDC register index" },
     { SDMAC_SASR_B2, BYTE, RW, "SDMAC_SASR_B",  "WDC register index" },
-    { SDMAC_CI,      LONG, RW, "SDMAC_CI",      "Coprocessor Interface Register" },
-    { SDMAC_CIDDR,   LONG, RW, "SDMAC_CIDDR",   "Coprocessor Interface Data Direction Register" },
-    { SDMAC_SSPBCTL, LONG, RW, "SDMAC_SSPBCTL", "Synchronous Serial Peripheral Bus Control Register"},
-    { SDMAC_SSPBDAT, LONG, RW, "SDMAC_SSPBDAT", "Synchronous Serial Peripheral Bus Data Register "},
+    { SDMAC_CI,      LONG, RW, "SDMAC_CI",
+      "Coprocessor Interface Register" },
+    { SDMAC_CIDDR,   LONG, RW, "SDMAC_CIDDR",
+      "Coprocessor Interface Data Direction Register" },
+    { SDMAC_SSPBCTL, LONG, RW, "SDMAC_SSPBCTL",
+      "Synchronous Serial Peripheral Bus Control Register"},
+    { SDMAC_SSPBDAT, LONG, RW, "SDMAC_SSPBDAT",
+      "Synchronous Serial Peripheral Bus Data Register "},
 };
 
 static const reglist_t wd_reglist[] = {
@@ -600,24 +604,23 @@ get_sdmac_version(void)
     int rev = 0;
     uint32_t ovalue;
     uint32_t rvalue;
-     
+
     INTERRUPTS_DISABLE();
-    ovalue = *ADDR32(SDMAC_WTC); 
+    ovalue = *ADDR32(SDMAC_WTC);
 
     /* Probe for SDMAC version */
     *ADDR32(SDMAC_WTC) = ovalue | BIT(2);
     rvalue = *ADDR32(SDMAC_WTC);
 
-    if (rvalue & BIT(2)){
-        rev = 2;  // SDMAC-02 WTC bit 2 is writable           
-    }
-    else{
+    if (rvalue & BIT(2)) {
+        rev = 2;  // SDMAC-02 WTC bit 2 is writable
+    } else {
         rev = 4;  // SDMAC-04 WTC bit 2 is read-only
-    }        
+    }
 
     *ADDR32(SDMAC_WTC) = ovalue;
     INTERRUPTS_ENABLE();
- 
+
     return (rev);
 }
 
@@ -676,21 +679,19 @@ static int sdmac_version = 0;
 static int
 show_dmac_version(void)
 {
-   
-    sdmac_version = get_sdmac_version();    
+    sdmac_version = get_sdmac_version();
 
     switch (sdmac_version) {
         case 2:
             printf("SCSI DMA Controller: SDMAC-%02d\n", sdmac_version);
-            return (0);                
+            return (0);
         case 4:
             printf("SCSI DMA Controller: SDMAC-%02d\n", sdmac_version);
-            return (0);     
-        default:    
+            return (0);
+        default:
             printf("Unrecognized SDMAC version -%02d\n", sdmac_version);
-            return (1);     
-    }  
-        
+            return (1);
+    }
 }
 
 static void
@@ -948,7 +949,8 @@ show_wdc_config(void)
         sync_khz = freq_mul * inclk / fsel_div / sync_tcycles;
         printf(", Sync %d.%03d MHz", sync_khz / 1000, sync_khz % 1000);
 #ifdef DEBUG_SYNC_CALC
-        printf("\ninclk=%uKHz mul=%u div=%u tcycles=%u\n", inclk, freq_mul, fsel_div, sync_tcycles);
+        printf("\ninclk=%uKHz mul=%u div=%u tcycles=%u\n",
+               inclk, freq_mul, fsel_div, sync_tcycles);
 #endif
     }
     printf("\n");
@@ -1072,14 +1074,14 @@ test_sdmac_access(void)
     switch (sdmac_version) {
         case 2:
             errs = test_sdmac_wtc();
-            break;            
+            break;
         case 4:
             errs = test_sdmac_sspbdat();
             break;
-    }  
+    }
 
     if (errs == 0)
-        printf("PASS\n");    
+        printf("PASS\n");
 
     return (errs);
 }
@@ -1215,7 +1217,7 @@ usage:
 
     show_ramsey_version();
     show_ramsey_config();
-    show_dmac_version();            
+    show_dmac_version();
     show_wdc_version();
     show_wdc_config();
     printf("\n");
