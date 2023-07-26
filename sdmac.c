@@ -1,5 +1,5 @@
 /*
- * SDMAC  Version 0.3 2023-03-28
+ * SDMAC  Version 0.4 2023-07-25
  * -----------------------------
  * Utility to inspect and test an Amiga 3000's Super DMAC (SDMAC),
  * WD SCSI controller for correct configuration and operation.
@@ -14,7 +14,7 @@
  * THE AUTHOR ASSUMES NO LIABILITY FOR ANY DAMAGE ARISING OUT OF THE USE
  * OR MISUSE OF THIS UTILITY OR INFORMATION REPORTED BY THIS UTILITY.
  */
-const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") � Chris Hooper";
+const char *version = "\0$VER: SDMAC 0.4 ("__DATE__") � Chris Hooper";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -35,9 +35,7 @@ const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") � Chris Hooper";
 
 #define SDMAC_BASE     0x00DD0000 //        Base address of SDMAC
 #define SDMAC_DAWR     0x00DD0003 // Write  DACK width register (write)
-#define SDMAC_WTC      0x00DD0004 // R/W    Word Transfer Count (obsolete)
-#define SDMAC_WTCH     0x00DD0004 // R/W    Word Transfer Count (SDMAC-02 only)
-#define SDMAC_WTCL     0x00DD0006 // R/W    Word Transfer Count (obsolete)
+#define SDMAC_WTC      0x00DD0004 // R/W    Word Transfer Count (SDMAC-02 only)
 #define SDMAC_CONTR    0x00DD000b // R/W    Control Register (byte)
 #define RAMSEY_ACR     0x00DD000C // R/W    DMA Control Register (in Ramsey)
 #define SDMAC_ST_DMA   0x00DD0013 // Strobe Start DMA (write 0 to start)
@@ -89,6 +87,8 @@ const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") � Chris Hooper";
 #define WDC_DATA       0x19 // R/W    Data
 #define WDC_QUETAG     0x1a // R/W    Queue Tag (WD33C93B only)
 #define WDC_AUXST      0x1f // Read   Auxiliary Status
+
+#define WDC_INVALID_REG 0x1e // Not a real WD register
 
 /* Interrupt status register */
 #define SDMAC_ISTR_FIFOE  0x01 // FIFO Empty
@@ -604,6 +604,10 @@ get_sdmac_version(void)
     int rev = 0;
     uint32_t ovalue;
     uint32_t rvalue;
+    uint8_t  istr = *ADDR8(SDMAC_ISTR);
+
+    if (istr != SDMAC_ISTR_FIFOE)
+        return (0);  // Any other status should be handled by SCSI ISR
 
     INTERRUPTS_DISABLE();
     ovalue = *ADDR32(SDMAC_WTC);
@@ -750,30 +754,72 @@ show_ramsey_config(void)
 
 
 
-#define LEVEL_WD33C93  0
-#define LEVEL_WD33C93A 1
-#define LEVEL_WD33C93B 2
+#define LEVEL_UNKNOWN  0
+#define LEVEL_WD33C93  1
+#define LEVEL_WD33C93A 2
+#define LEVEL_WD33C93B 3
 uint        wd_level = LEVEL_WD33C93;
+static const uint8_t valid_cmd_phases[] = {
+    0x00, 0x10, 0x20,
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+    0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
+    0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
+    0x50,
+    0x60, 0x61,
+};
 
 static void
 show_wdc_version(void)
 {
+    uint8_t     cvalue;
     uint8_t     ovalue;
     uint8_t     rvalue;
     uint8_t     wvalue;
     uint        pass;
+    uint        errs = 0;
     const char *wd_rev = "";
 
     printf("SCSI Controller:     ");
-    /*
-     * XXX: Is there a way to tell the AMD part from the WD part?
-     */
+
+    /* Verify that WD33C93 or WD33C93A can be detected */
+    rvalue = get_wdc_reg(WDC_INVALID_REG);
+    if (rvalue != 0xff)
+        errs |= 1;
+    rvalue = get_wdc_reg(WDC_AUXST);
+    if (rvalue & (BIT(2) | BIT(3)))
+        errs |= 2;
+    rvalue = get_wdc_reg(WDC_LUN);
+    if (rvalue & (BIT(3) | BIT(4) | BIT(5)))
+        errs |= 4;
+    rvalue = get_wdc_reg(WDC_CMDPHASE);
+    for (pass = 0; pass < ARRAY_SIZE(valid_cmd_phases); pass++)
+        if (rvalue == valid_cmd_phases[pass])
+            break;
+    if (pass == ARRAY_SIZE(valid_cmd_phases))
+        errs |= 8;
+    rvalue = get_wdc_reg(WDC_SCSI_STAT);
+    switch (rvalue >> 4) {
+        case 0:
+        case 1:
+        case 2:
+        case 4:
+        case 8:
+            break;
+        default:
+            errs |= 0x10;
+            break;
+    }
+
+    if (errs) {
+        wd_level = LEVEL_UNKNOWN;
+        goto fail;
+    }
+
+    wd_level = LEVEL_WD33C93;
     INTERRUPTS_DISABLE();
     ovalue = get_wdc_reg(WDC_OWN_ID);
     if (ovalue & BIT(4)) {  // HHP (Halt on Host Parity error)
         /*
-         * XXX: Verify that WD33C93 can be detected.
-         *
          * Official way to detect the WD33C93A vs the WD33C93:
          *
          * Enable:
@@ -802,6 +848,7 @@ show_wdc_version(void)
          * new value sticks, this part must be a WD33C93B.
          */
         INTERRUPTS_DISABLE();
+        cvalue = get_wdc_reg(WDC_CONTROL);
         ovalue = get_wdc_reg(WDC_QUETAG);
         for (pass = 0; pass < 4; pass++) {
             switch (pass) {
@@ -812,6 +859,9 @@ show_wdc_version(void)
             }
             set_wdc_reg(WDC_QUETAG, wvalue);
             rvalue = get_wdc_reg(WDC_QUETAG);
+            if (get_wdc_reg(WDC_CONTROL) != cvalue) {
+                break;  // Control register should remain the same
+            }
             if (rvalue != wvalue) {
                 break;
             }
@@ -824,21 +874,42 @@ show_wdc_version(void)
         }
     }
     if (wd_level == LEVEL_WD33C93A) {
+        /*
+         * This table is mostly an assumption by me:
+         *            Marking   Revision
+         *   WD33C93A 00-01     A           Not released?
+         *   WD33C93A 00-02     B  Seen in A2091
+         *   WD33C93A 00-03     C  Vesalia has stock, seen on ebay
+         *   WD33C93A 00-04     D  Common in A3000, with "PROTO" label
+         *   WD33C93A 00-05     E           Not released?
+         *   WD33C93A 00-06     E  Seen on ebay
+         *   WD33C93A 00-07     F           Not released?
+         *   WD33C93A 00-08     F  Final production, same as AM33C93A
+         */
+
+        /*
+         * The below tests don't work because the older parts
+         * still allow all bits in the register to be set.
+         */
+        wd_rev = "or AM33C93A";
+#if 0
         /* Test for Revision E or Revision F */
         INTERRUPTS_DISABLE();
         ovalue = get_wdc_reg(WDC_DST_ID);
-        if (ovalue & BIT(5)) {  // EIH - Enable Immediate Halt
+        if (ovalue & BIT(5)) {  // DF - Data Phase Direction Check Disable
             wd_rev = "00-04 or higher or AM33C93A";
         } else {
             wvalue = ovalue | BIT(5);
             set_wdc_reg(WDC_OWN_ID, wvalue);
             rvalue = get_wdc_reg(WDC_OWN_ID);
             if (rvalue & BIT(5)) {
-                set_wdc_reg(WDC_OWN_ID, ovalue);
                 wd_rev = "00-04 or higher or AM33C93A";
             } else {
                 /*
                  * XXX: Verify that this works to detect 00-02 part
+                 *
+                 *      A3000 doesn't boot with 00-02 part installed.
+                 *      It just hangs at first SCSI access.
                  *
                  * We should also (but don't) fall into this category for
                  * AM33C93A because the AMD datasheet says Own ID bit 5 is
@@ -846,10 +917,28 @@ show_wdc_version(void)
                  */
                 wd_rev = "00-02 C-D";
             }
+            set_wdc_reg(WDC_OWN_ID, ovalue);
         }
         INTERRUPTS_ENABLE();
+#endif
     }
+
+fail:
     switch (wd_level) {
+        case LEVEL_UNKNOWN:
+            printf("Not detected:");
+            if (errs & 1)
+                printf(" INVALID");
+            if (errs & 2)
+                printf(" AUXST");
+            if (errs & 4)
+                printf(" LUN");
+            if (errs & 8)
+                printf(" CMDPHASE");
+            if (errs & 0x10)
+                printf(" STAT");
+            printf("\n");
+            break;
         case LEVEL_WD33C93:
             printf("WD33C93\n");
             break;
@@ -1023,7 +1112,6 @@ test_sdmac_sspbdat(void)
     *ADDR32(SDMAC_SSPBDAT) = ovalue;
     INTERRUPTS_ENABLE();
     return (errs);
-
 }
 
 static int
@@ -1035,7 +1123,7 @@ test_ramsey_access(void)
     uint32_t rvalue;
     int errs = 0;
 
-    printf("Ramsey ACR test: ");
+    printf("Ramsey test:  ");
     fflush(stdout);
     SUPERVISOR_STATE_ENTER();
     INTERRUPTS_DISABLE();
@@ -1068,7 +1156,7 @@ test_sdmac_access(void)
 {
     int errs = 0;
 
-    printf("SDMAC Register test:  ");
+    printf("SDMAC test:   ");
     fflush(stdout);
 
     switch (sdmac_version) {
@@ -1093,18 +1181,29 @@ test_wdc_access(void)
     uint8_t ovalue;
     uint8_t wvalue;
     uint8_t rvalue = 0;
+    uint8_t covalue;
+    uint8_t crvalue;
     int errs = 0;
 
-    printf("WD SCSI access:  ");
+    printf("WDC test:     ");
     fflush(stdout);
 
     /* WDC_LADDR0 should be fully writable */
     INTERRUPTS_DISABLE();
+    covalue = get_wdc_reg(WDC_CONTROL);
     ovalue = get_wdc_reg(WDC_LADDR0);
     for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
         wvalue = test_values[pos] & 0x000000ff;
         set_wdc_reg(WDC_LADDR0, wvalue);
         (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
+        crvalue = get_wdc_reg(WDC_CONTROL);
+        if (crvalue != covalue) {
+            INTERRUPTS_ENABLE();
+            if (errs++ == 0)
+                printf("FAIL\n");
+            printf("  WDC_CONTROL %02x != expected %02x\n", crvalue, covalue);
+            INTERRUPTS_DISABLE();
+        }
         rvalue = get_wdc_reg(WDC_LADDR0);
         if (rvalue != wvalue) {
             set_wdc_reg(WDC_LADDR0, ovalue);
@@ -1121,11 +1220,20 @@ test_wdc_access(void)
 
     /* WDC_AUXST should be read-only */
     INTERRUPTS_DISABLE();
+    covalue = get_wdc_reg(WDC_CONTROL);
     ovalue = get_wdc_reg(WDC_AUXST);
     for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
         wvalue = test_values[pos] & 0x000000ff;
         set_wdc_reg(WDC_AUXST, wvalue);
         (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
+        crvalue = get_wdc_reg(WDC_CONTROL);
+        if (crvalue != covalue) {
+            INTERRUPTS_ENABLE();
+            if (errs++ == 0)
+                printf("FAIL\n");
+            printf("  WDC_CONTROL %02x != expected %02x\n", crvalue, covalue);
+            INTERRUPTS_DISABLE();
+        }
         rvalue = get_wdc_reg(WDC_AUXST);
         if (rvalue != ovalue) {
             set_wdc_reg(WDC_AUXST, ovalue);
@@ -1141,14 +1249,22 @@ test_wdc_access(void)
     set_wdc_reg(WDC_AUXST, ovalue);
     INTERRUPTS_ENABLE();
 
-#define WDC_INVALID_REG 0x1e
     /* Undefined WDC register should be read-only and always 0xff */
     INTERRUPTS_DISABLE();
+    covalue = get_wdc_reg(WDC_CONTROL);
     ovalue = get_wdc_reg(WDC_INVALID_REG);
     for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
         wvalue = test_values[pos] & 0x000000ff;
         set_wdc_reg(WDC_INVALID_REG, wvalue);
         (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
+        crvalue = get_wdc_reg(WDC_CONTROL);
+        if (crvalue != covalue) {
+            INTERRUPTS_ENABLE();
+            if (errs++ == 0)
+                printf("FAIL\n");
+            printf("  WDC_CONTROL %02x != expected %02x\n", crvalue, covalue);
+            INTERRUPTS_DISABLE();
+        }
         rvalue = get_wdc_reg(WDC_INVALID_REG);
         if (rvalue != ovalue) {
             set_wdc_reg(WDC_INVALID_REG, ovalue);
@@ -1163,11 +1279,11 @@ test_wdc_access(void)
     }
     set_wdc_reg(WDC_INVALID_REG, ovalue);
     INTERRUPTS_ENABLE();
-
     if (rvalue != 0xff) {
         if (errs++ == 0)
             printf("FAIL\n");
-        printf("  WDC Reg 0x1e %02x != expected 0xff\n", rvalue);
+        printf("  WDC Reg 0x%02x %02x != expected 0xff\n",
+               WDC_INVALID_REG, rvalue);
     }
 
     if (errs == 0)
@@ -1206,11 +1322,11 @@ main(int argc, char **argv)
             }
         } else {
 usage:
-            printf("Options:\n"
+            printf("%s\nOptions:\n"
                    "    -L Loop tests until failure\n"
                    "    -r Display registers\n"
                    "    -s Display raw SDMAC registers\n"
-                   "    -v Display program version\n");
+                   "    -v Display program version\n", version + 7);
             exit(1);
         }
     }
