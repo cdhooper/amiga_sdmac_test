@@ -59,6 +59,7 @@ const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") � Chris Hooper";
 
 #define SDMAC_WTC_ALT  (SDMAC_WTC +  0x80) // Shadow of SDMAC WTC
 #define RAMSEY_ACR_ALT (RAMSEY_ACR + 0x80) // Shadow of Ramsey ACR
+#define SDMAC_SSPBDAT_ALT (SDMAC_SSPBDAT +  0x80) // Shadow of SDMAC SSPBDAT
 
 #define WDC_ADDR       0x00 // Write  WDC Address Register
 #define WDC_OWN_ID     0x00 // R/W    Own ID
@@ -104,10 +105,12 @@ const char *version = "\0$VER: SDMAC 0.3 ("__DATE__") � Chris Hooper";
 #define SDMAC_CONTR_IODX   0x01 // Reserved (0)
 #define SDMAC_CONTR_DMADIR 0x02 // DMA Data direction (0=Read, 1=Write)
 #define SDMAC_CONTR_INTEN  0x04 // Interrupt enable
-// #define SDMAC_CONTR_PMODE  0x08 // Peripheral mode (1=SCSI)
+//#define SDMAC_CONTR_PMODE  0x08 // Peripheral mode (1=SCSI)
 #define SDMAC_CONTR_RESET  0x10 // Peripheral reset (Strobe)
-// #define SDMAC_CONTR_TCE    0x20 // Terminal count enable
-#define SDMAC_CONTR_DMAENA 0x80 // DMA Enabled
+#define SDMAC_CONTR_TCE    0x20 // Terminal count enable
+//#define SDMAC_CONTR_0x40   0x40 // Reserved (6)
+//#define SDMAC_CONTR_0x80   0x80 // Reserved (7)
+#define SDMAC_CONTR_DMAENA 0x100 // DMA Enabled
 
 /* Coprocessor Interface Register */
 
@@ -1005,11 +1008,11 @@ test_sdmac_sspbdat(void)
     ovalue = *ADDR32(SDMAC_SSPBDAT);
     for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
         wvalue = test_values[pos] & 0x000000ff;
-        *ADDR32(SDMAC_SSPBDAT) = wvalue;
+        *ADDR32(SDMAC_SSPBDAT_ALT) = wvalue;
         (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
         rvalue = *ADDR32(SDMAC_SSPBDAT) & 0x000000ff;
         if (rvalue != wvalue) {
-            *ADDR32(SDMAC_SSPBDAT) = ovalue;
+            *ADDR32(SDMAC_SSPBDAT_ALT) = ovalue;
             INTERRUPTS_ENABLE();
             if (errs++ == 0)
                 printf("FAIL\n");
@@ -1018,7 +1021,7 @@ test_sdmac_sspbdat(void)
             ovalue = *ADDR32(SDMAC_SSPBDAT);
         }
     }
-    *ADDR32(SDMAC_SSPBDAT) = ovalue;
+    *ADDR32(SDMAC_SSPBDAT_ALT) = ovalue;
     INTERRUPTS_ENABLE();
     return (errs);
 
