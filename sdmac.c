@@ -1,5 +1,5 @@
 /*
- * SDMAC  Version 0.4 2023-07-25
+ * SDMAC  Version 0.5 2023-09-25
  * -----------------------------
  * Utility to inspect and test an Amiga 3000's Super DMAC (SDMAC),
  * WD SCSI controller for correct configuration and operation.
@@ -14,7 +14,7 @@
  * THE AUTHOR ASSUMES NO LIABILITY FOR ANY DAMAGE ARISING OUT OF THE USE
  * OR MISUSE OF THIS UTILITY OR INFORMATION REPORTED BY THIS UTILITY.
  */
-const char *version = "\0$VER: SDMAC 0.4 ("__DATE__") � Chris Hooper";
+const char *version = "\0$VER: SDMAC 0.5 ("__DATE__") � Chris Hooper";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -129,6 +129,13 @@ const char *version = "\0$VER: SDMAC 0.4 ("__DATE__") � Chris Hooper";
 
 #define INTERRUPTS_DISABLE() Disable()  /* Disable Interrupts */
 #define INTERRUPTS_ENABLE()  Enable()   /* Enable Interrupts */
+
+#define AMIGA_BERR_DSACK 0x00de0000  // Bit7=1 for BERR on timeout, else DSACK
+#define BERR_DSACK_SAVE() \
+        uint8_t old_berr_dsack = *ADDR8(AMIGA_BERR_DSACK); \
+        *ADDR8(AMIGA_BERR_DSACK) &= ~BIT(7);
+#define BERR_DSACK_RESTORE() \
+        *ADDR8(AMIGA_BERR_DSACK) = old_berr_dsack;
 
 /* Ramsey-07 requires the processor to be in Supervisor state */
 #define USE_SUPERVISOR_STATE
@@ -657,7 +664,7 @@ get_ramsey_control(void)
 
 static int ramsey_rev = 0;
 
-static int
+static uint
 show_ramsey_version(void)
 {
     uint8_t ramsey_version = get_ramsey_version();
@@ -683,7 +690,7 @@ show_ramsey_version(void)
 
 static int sdmac_version = 0;
 
-static int
+static uint
 show_dmac_version(void)
 {
     sdmac_version = get_sdmac_version();
@@ -701,7 +708,7 @@ show_dmac_version(void)
     }
 }
 
-static void
+static uint
 show_ramsey_config(void)
 {
     int     printed = 0;
@@ -753,6 +760,7 @@ show_ramsey_config(void)
     if (ramsey_control & (BIT(0) | BIT(1))) {  // Page or Burst mode
         printf("                     Static Column RAM required\n");
     }
+    return (0);
 }
 
 
@@ -771,7 +779,7 @@ static const uint8_t valid_cmd_phases[] = {
     0x60, 0x61,
 };
 
-static void
+static uint
 show_wdc_version(void)
 {
     uint8_t     cvalue;
@@ -952,9 +960,10 @@ fail:
             printf("WD33C93B %s\n", wd_rev);
             break;
     }
+    return (errs);
 }
 
-static void
+static uint
 show_wdc_config(void)
 {
     const uint inclk_pal  = 28375 / 2;   // PAL frequency  28.37516 MHz
@@ -1046,6 +1055,7 @@ show_wdc_config(void)
 #endif
     }
     printf("\n");
+    return (0);
 }
 
 static uint32_t test_values[] = {
@@ -1334,11 +1344,14 @@ usage:
         }
     }
 
-    show_ramsey_version();
-    show_ramsey_config();
-    show_dmac_version();
-    show_wdc_version();
-    show_wdc_config();
+    BERR_DSACK_SAVE();
+    if (show_ramsey_version() ||
+        show_ramsey_config() ||
+        show_dmac_version() ||
+        show_wdc_version() ||
+        show_wdc_config()) {
+        goto finish;
+    }
     printf("\n");
 
     do {
@@ -1349,6 +1362,7 @@ usage:
         }
     } while (loop_until_failure);
 
+finish:
     if (all_regs) {
         show_regs();
     }
@@ -1356,6 +1370,7 @@ usage:
         get_raw_regs();
         dump_raw_sdmac_regs();
     }
+    BERR_DSACK_RESTORE();
 
     exit(0);
 }
