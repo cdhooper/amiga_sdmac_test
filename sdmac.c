@@ -14,7 +14,7 @@
  * THE AUTHOR ASSUMES NO LIABILITY FOR ANY DAMAGE ARISING OUT OF THE USE
  * OR MISUSE OF THIS UTILITY OR INFORMATION REPORTED BY THIS UTILITY.
  */
-const char *version = "\0$VER: SDMAC 0.5 ("__DATE__") ï¿½ Chris Hooper";
+const char *version = "\0$VER: SDMAC 0.5 ("__DATE__") © Chris Hooper";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +30,8 @@ const char *version = "\0$VER: SDMAC 0.5 ("__DATE__") ï¿½ Chris Hooper";
 #include <exec/execbase.h>
 #include <exec/lists.h>
 
+#define ROM_BASE       0x00f80000 // Kickstart ROM base address
+
 #define RAMSEY_CTRL    0x00de0003 // Ramsey control register
 #define RAMSEY_VER     0x00de0043 // Ramsey version register
 
@@ -42,6 +44,7 @@ const char *version = "\0$VER: SDMAC 0.5 ("__DATE__") ï¿½ Chris Hooper";
 #define SDMAC_FLUSH    0x00DD0017 // Strobe Flush DMA FIFO
 #define SDMAC_CLR_INT  0x00DD001b // Strobe Clear Interrupts
 #define SDMAC_ISTR     0x00DD001f // Read   Interrupt Status Register
+#define SDMAC_REVISION 0x00DD0020 // Read   Revision of ReSDMAC
 #define SDMAC_SP_DMA   0x00DD003f // Strobe Stop DMA
 #define SDMAC_SASR_L   0x00DD0040 // Write  WDC SASR long (obsolete)
 #define SDMAC_SASR_B   0x00DD0041 // Read   WDC SASR byte (obsolete)
@@ -152,6 +155,10 @@ const char *version = "\0$VER: SDMAC 0.5 ("__DATE__") ï¿½ Chris Hooper";
 extern struct ExecBase *SysBase;
 
 typedef unsigned int uint;
+
+static uint8_t     flag_debug        = 0;
+static uint8_t     flag_force_test   = 0;
+static const char *sdmac_fail_reason = "";
 
 #define DUMP_WORDS_AND_LONGS
 #ifdef DUMP_WORDS_AND_LONGS
@@ -608,34 +615,72 @@ show_regs(void)
     }
 }
 
-static int
+__attribute__((noinline))
+uint8_t
 get_sdmac_version(void)
 {
-    int rev = 0;
     uint32_t ovalue;
     uint32_t rvalue;
     uint8_t  istr = *ADDR8(SDMAC_ISTR);
+    uint     pass;
 
-    if (istr != SDMAC_ISTR_FIFOE)
-        return (0);  // Any other status should be handled by SCSI ISR
-
-    INTERRUPTS_DISABLE();
-    ovalue = *ADDR32(SDMAC_WTC);
-
-    /* Probe for SDMAC version */
-    *ADDR32(SDMAC_WTC) = ovalue | BIT(2);
-    rvalue = *ADDR32(SDMAC_WTC);
-
-    if (rvalue & BIT(2)) {
-        rev = 2;  // SDMAC-02 WTC bit 2 is writable
-    } else {
-        rev = 4;  // SDMAC-04 WTC bit 2 is read-only
+    sdmac_fail_reason = "";
+    if ((istr & SDMAC_ISTR_FIFOE) && (istr & SDMAC_ISTR_FIFOF)) {
+        sdmac_fail_reason = "FIFO register test fail";
+        if (flag_debug)
+            printf(">> SDMAC_ISTR %02x has both FIFOE and FIFOF set\n", istr);
+        return (0);  // Can not be both full and empty
     }
 
-    *ADDR32(SDMAC_WTC) = ovalue;
-    INTERRUPTS_ENABLE();
 
-    return (rev);
+    /* Probe for SDMAC version */
+    for (pass = 0; pass < 6; pass++) {
+        uint32_t wvalue;
+        switch (pass) {
+            case 0: wvalue = 0x00000000; break;
+            case 1: wvalue = 0xffffffff; break;
+            case 2: wvalue = 0xa5a5a5a5; break;
+            case 3: wvalue = 0x5a5a5a5a; break;
+            case 4: wvalue = 0xc2c2c3c3; break;
+            case 5: wvalue = 0x3c3c3c3c; break;
+        }
+
+        INTERRUPTS_DISABLE();
+        ovalue = *ADDR32(SDMAC_WTC);
+        *ADDR32(SDMAC_WTC) = wvalue;
+#define FORCE_READ(x) asm volatile ("" : : "r" (x));
+        /* Push out write and buffer something else on the bus */
+        (void) *ADDR32(ROM_BASE);
+        rvalue = *ADDR32(SDMAC_WTC);
+        *ADDR32(SDMAC_WTC) = ovalue;
+        INTERRUPTS_ENABLE();
+
+        if (rvalue == wvalue) {
+            /* At least some bits of this register are read-only in SDMAC */
+            if ((wvalue != 0x00000000) && (wvalue != 0xffffffff)) {
+                sdmac_fail_reason = "read-only register bits not read-only";
+                if (flag_debug) {
+                    printf(">> SDMAC_WTC wvalue=%02x rvalue=%08x\n",
+                           wvalue, rvalue);
+                }
+                return (0);
+            }
+        } else if (((rvalue ^ wvalue) & 0x00ffffff) == 0) {
+            /* SDMAC-02 */
+        } else if ((rvalue & BIT(2)) == 0) {
+            /* SDMAC-04 possibly */
+            if (wvalue & BIT(2))
+                return (4);  // SDMAC-04 BIT(2) is always 0
+        } else {
+            sdmac_fail_reason = "bit corruption in WTC register";
+            if (flag_debug) {
+                printf(">> SDMAC_WTC wvalue=%02x rvalue=%08x\n",
+                       wvalue, rvalue);
+            }
+            return (0);
+        }
+    }
+    return (2);      // SDMAC-02 WTC bits 0-23 are writable
 }
 
 static uint8_t
@@ -688,22 +733,25 @@ show_ramsey_version(void)
     return (0);
 }
 
-static int sdmac_version = 0;
+static uint8_t sdmac_version     = 0;
+static uint8_t sdmac_version_rev = 0;
 
 static uint
 show_dmac_version(void)
 {
-    sdmac_version = get_sdmac_version();
+    sdmac_version     = get_sdmac_version();
+    sdmac_version_rev = (sdmac_version == 4) ? *ADDR8(SDMAC_REVISION) : 0;
 
     switch (sdmac_version) {
         case 2:
-            printf("SCSI DMA Controller: SDMAC-%02d\n", sdmac_version);
-            return (0);
         case 4:
-            printf("SCSI DMA Controller: SDMAC-%02d\n", sdmac_version);
+            printf("SCSI DMA Controller: SDMAC-%02d", sdmac_version);
+            if ((sdmac_version_rev != 0x00) && (sdmac_version_rev != 0xff))
+                printf("  Rev %02x\n", sdmac_version_rev);
+            printf("\n");
             return (0);
         default:
-            printf("Unrecognized SDMAC version -%02d\n", sdmac_version);
+            printf("SDMAC was not detected: %s\n", sdmac_fail_reason);
             return (1);
     }
 }
@@ -1079,7 +1127,7 @@ test_sdmac_wtc(void)
     for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
         wvalue = test_values[pos] & 0x00ffffff;
         *ADDR32(SDMAC_WTC_ALT) = wvalue;
-        (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
+        (void) *ADDR32(ROM_BASE);  // flush bus access
         rvalue = *ADDR32(SDMAC_WTC) & 0x00ffffff;
         if (rvalue != wvalue) {
             *ADDR32(SDMAC_WTC_ALT) = ovalue;
@@ -1110,7 +1158,7 @@ test_sdmac_sspbdat(void)
     for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
         wvalue = test_values[pos] & 0x000000ff;
         *ADDR32(SDMAC_SSPBDAT_ALT) = wvalue;
-        (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
+        (void) *ADDR32(ROM_BASE);  // flush bus access
         rvalue = *ADDR32(SDMAC_SSPBDAT) & 0x000000ff;
         if (rvalue != wvalue) {
             *ADDR32(SDMAC_SSPBDAT_ALT) = ovalue;
@@ -1144,7 +1192,7 @@ test_ramsey_access(void)
     for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
         wvalue = test_values[pos] & 0xfffffffc;
         *ADDR32(RAMSEY_ACR_ALT) = wvalue;
-        (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
+        (void) *ADDR32(ROM_BASE);  // flush bus access
         rvalue = *ADDR32(RAMSEY_ACR);
         if (rvalue != wvalue) {
             *ADDR32(RAMSEY_ACR_ALT) = ovalue;
@@ -1208,7 +1256,7 @@ test_wdc_access(void)
     for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
         wvalue = test_values[pos] & 0x000000ff;
         set_wdc_reg(WDC_LADDR0, wvalue);
-        (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
+        (void) *ADDR32(ROM_BASE);  // flush bus access
         crvalue = get_wdc_reg(WDC_CONTROL);
         if (crvalue != covalue) {
             INTERRUPTS_ENABLE();
@@ -1238,7 +1286,7 @@ test_wdc_access(void)
     for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
         wvalue = test_values[pos] & 0x000000ff;
         set_wdc_reg(WDC_AUXST, wvalue);
-        (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
+        (void) *ADDR32(ROM_BASE);  // flush bus access
         crvalue = get_wdc_reg(WDC_CONTROL);
         if (crvalue != covalue) {
             INTERRUPTS_ENABLE();
@@ -1269,7 +1317,7 @@ test_wdc_access(void)
     for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
         wvalue = test_values[pos] & 0x000000ff;
         set_wdc_reg(WDC_INVALID_REG, wvalue);
-        (void) *ADDR8(RAMSEY_CTRL);  // flush bus access
+        (void) *ADDR32(ROM_BASE);  // flush bus access
         crvalue = get_wdc_reg(WDC_CONTROL);
         if (crvalue != covalue) {
             INTERRUPTS_ENABLE();
@@ -1317,6 +1365,9 @@ main(int argc, char **argv)
         if (*ptr == '-') {
             while (*(++ptr) != '\0') {
                 switch (*ptr) {
+                    case 'd':
+                        flag_debug++;
+                        break;
                     case 'L':
                         loop_until_failure++;
                         break;
@@ -1325,6 +1376,9 @@ main(int argc, char **argv)
                         break;
                     case 's':
                         raw_sdmac_regs++;
+                        break;
+                    case 't':
+                        flag_force_test++;
                         break;
                     case 'v':
                         printf("%s\n", version + 7);
@@ -1336,9 +1390,11 @@ main(int argc, char **argv)
         } else {
 usage:
             printf("%s\nOptions:\n"
+                   "    -d Debug output\n"
                    "    -L Loop tests until failure\n"
                    "    -r Display registers\n"
                    "    -s Display raw SDMAC registers\n"
+                   "    -t Force tests to run\n"
                    "    -v Display program version\n", version + 7);
             exit(1);
         }
@@ -1350,7 +1406,8 @@ usage:
         show_dmac_version() ||
         show_wdc_version() ||
         show_wdc_config()) {
-        goto finish;
+        if (flag_force_test == 0)
+            goto finish;
     }
     printf("\n");
 
