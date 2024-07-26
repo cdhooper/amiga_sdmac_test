@@ -1,20 +1,20 @@
 /*
- * SDMAC  Version 0.5 2023-09-25
+ * SDMAC  Version 0.6 2024-07-26
  * -----------------------------
  * Utility to inspect and test an Amiga 3000's Super DMAC (SDMAC),
  * WD SCSI controller for correct configuration and operation.
  *
- * Copyright 2023 Chris Hooper.  This program and source may be used
- * and distributed freely, for any purpose which benefits the Amiga
- * community. Commercial use of the binary, source, or algorithms requires
- * prior written or email approval from Chris Hooper <amiga@cdh.eebugs.com>.
+ * Copyright Chris Hooper.  This program and source may be used and
+ * distributed freely, for any purpose which benefits the Amiga community.
+ * Commercial use of the binary, source, or algorithms requires prior
+ * written or email approval from Chris Hooper <amiga@cdh.eebugs.com>.
  * All redistributions must retain this Copyright notice.
  *
  * DISCLAIMER: THE SOFTWARE IS PROVIDED "AS-IS", WITHOUT ANY WARRANTY.
  * THE AUTHOR ASSUMES NO LIABILITY FOR ANY DAMAGE ARISING OUT OF THE USE
  * OR MISUSE OF THIS UTILITY OR INFORMATION REPORTED BY THIS UTILITY.
  */
-const char *version = "\0$VER: SDMAC 0.5 ("__DATE__") © Chris Hooper";
+const char *version = "\0$VER: SDMAC 0.6 ("__DATE__") © Chris Hooper";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,6 +38,7 @@ const char *version = "\0$VER: SDMAC 0.5 ("__DATE__") © Chris Hooper";
 #define SDMAC_BASE     0x00DD0000 //        Base address of SDMAC
 #define SDMAC_DAWR     0x00DD0003 // Write  DACK width register (write)
 #define SDMAC_WTC      0x00DD0004 // R/W    Word Transfer Count (SDMAC-02 only)
+#define SDMAC_CNTR     0x00DD0008 // R/W    Control Register (byte) from doc
 #define SDMAC_CONTR    0x00DD000b // R/W    Control Register (byte)
 #define RAMSEY_ACR     0x00DD000C // R/W    DMA Control Register (in Ramsey)
 #define SDMAC_ST_DMA   0x00DD0013 // Strobe Start DMA (write 0 to start)
@@ -58,9 +59,9 @@ const char *version = "\0$VER: SDMAC 0.5 ("__DATE__") © Chris Hooper";
 #define SDMAC_SSPBDAT  0x00DD0058 // R/W    Sync. Serial Periph. Bus Data (long)
 #define SDMAC_SSPBCTL  0x00DD005C // R/W    Sync. Serial Periph. Bus Ctrl (long)
 
-#define SDMAC_WTC_ALT  (SDMAC_WTC +  0x80) // Shadow of SDMAC WTC
-#define RAMSEY_ACR_ALT (RAMSEY_ACR + 0x80) // Shadow of Ramsey ACR
-#define SDMAC_SSPBDAT_ALT (SDMAC_SSPBDAT +  0x80) // Shadow of SDMAC SSPBDAT
+#define SDMAC_WTC_ALT  (SDMAC_WTC +  0x100) // Shadow of SDMAC WTC
+#define RAMSEY_ACR_ALT (RAMSEY_ACR + 0x100) // Shadow of Ramsey ACR
+#define SDMAC_SSPBDAT_ALT (SDMAC_SSPBDAT +  0x100) // Shadow of SDMAC SSPBDAT
 
 #define WDC_ADDR       0x00 // Write  WDC Address Register
 #define WDC_OWN_ID     0x00 // R/W    Own ID
@@ -94,6 +95,8 @@ const char *version = "\0$VER: SDMAC 0.5 ("__DATE__") © Chris Hooper";
 
 #define WDC_INVALID_REG 0x1e // Not a real WD register
 
+#define WDC_CMD_RESET     0x00 // Soft reset the WDC controller
+
 /* Interrupt status register */
 #define SDMAC_ISTR_FIFOE  0x01 // FIFO Empty
 #define SDMAC_ISTR_FIFOF  0x02 // FIFO Full
@@ -109,7 +112,7 @@ const char *version = "\0$VER: SDMAC 0.5 ("__DATE__") © Chris Hooper";
 #define SDMAC_CONTR_DMADIR 0x02 // DMA Data direction (0=Read, 1=Write)
 #define SDMAC_CONTR_INTEN  0x04 // Interrupt enable
 //#define SDMAC_CONTR_PMODE  0x08 // Peripheral mode (1=SCSI)
-#define SDMAC_CONTR_RESET  0x10 // Peripheral reset (Strobe)
+#define SDMAC_CONTR_RESET  0x10 // WDC Peripheral reset (Strobe)
 #define SDMAC_CONTR_TCE    0x20 // Terminal count enable
 //#define SDMAC_CONTR_0x40   0x40 // Reserved (6)
 //#define SDMAC_CONTR_0x80   0x80 // Reserved (7)
@@ -231,29 +234,30 @@ typedef struct {
 } reglist_t;
 
 static const reglist_t sdmac_reglist[] = {
-    { RAMSEY_CTRL,   BYTE, RW, "Ramsey_CTRL",   "Ramsey Control" },
-    { RAMSEY_VER,    BYTE, RW, "Ramsey_VER",    "Ramsey Version" },
-    { SDMAC_DAWR,    BYTE, WO, "SDMAC_DAWR",    "DACK width register (WO)" },
-    { SDMAC_WTC,     LONG, RW, "SDMAC_WTC",     "Word Transfer Count" },
-    { SDMAC_CONTR,   BYTE, RW, "SDMAC_CONTR",   "Control Register" },
-    { RAMSEY_ACR,    LONG, RW, "Ramsey_ACR",    "DMA Address Register" },
-    { SDMAC_ST_DMA,  BYTE, WO, "SDMAC_ST_DMA",  "Start DMA" },
-    { SDMAC_FLUSH,   BYTE, WO, "SDMAC_FLUSH",   "Flush DMA FIFO" },
-    { SDMAC_CLR_INT, BYTE, WO, "SDMAC_CLR_INT", "Clear Interrupts" },
-    { SDMAC_ISTR,    BYTE, RO, "SDMAC_ISTR",    "Interrupt Status Register" },
-    { SDMAC_SP_DMA,  BYTE, WO, "SDMAC_SP_DMA",  "Stop DMA" },
-    { SDMAC_SASR_L,  LONG, WO, "SDMAC_SASR_L",  "WDC register index" },
-    { SDMAC_SASR_B,  BYTE, RO, "SDMAC_SASR_B",  "WDC register index" },
-    { SDMAC_SCMD,    BYTE, RW, "SDMAC_SCMD",    "WDC register data" },
-    { SDMAC_SASRW,   LONG, WO, "SDMAC_SASRW",   "WDC register index" },
-    { SDMAC_SASR_B2, BYTE, RW, "SDMAC_SASR_B",  "WDC register index" },
-    { SDMAC_CI,      LONG, RW, "SDMAC_CI",
+    { RAMSEY_CTRL,    BYTE, RW, "Ramsey_CTRL",    "Ramsey Control" },
+    { RAMSEY_VER,     BYTE, RW, "Ramsey_VER",     "Ramsey Version" },
+    { SDMAC_DAWR,     BYTE, WO, "SDMAC_DAWR",     "DACK width register (WO)" },
+    { SDMAC_WTC,      LONG, RW, "SDMAC_WTC",      "Word Transfer Count" },
+    { SDMAC_CONTR,    BYTE, RW, "SDMAC_CONTR",    "Control Register" },
+    { RAMSEY_ACR,     LONG, RW, "Ramsey_ACR",     "DMA Address Register" },
+    { SDMAC_ST_DMA,   BYTE, WO, "SDMAC_ST_DMA",   "Start DMA" },
+    { SDMAC_FLUSH,    BYTE, WO, "SDMAC_FLUSH",    "Flush DMA FIFO" },
+    { SDMAC_CLR_INT,  BYTE, WO, "SDMAC_CLR_INT",  "Clear Interrupts" },
+    { SDMAC_ISTR,     BYTE, RO, "SDMAC_ISTR",     "Interrupt Status Register" },
+    { SDMAC_REVISION, LONG, RO, "SDMAC_REVISION", "ReSDMAC revision" },
+    { SDMAC_SP_DMA,   BYTE, WO, "SDMAC_SP_DMA",   "Stop DMA" },
+    { SDMAC_SASR_L,   LONG, WO, "SDMAC_SASR_L",   "WDC register index" },
+    { SDMAC_SASR_B,   BYTE, RO, "SDMAC_SASR_B",   "WDC register index" },
+    { SDMAC_SCMD,     BYTE, RW, "SDMAC_SCMD",     "WDC register data" },
+    { SDMAC_SASRW,    LONG, WO, "SDMAC_SASRW",    "WDC register index" },
+    { SDMAC_SASR_B2,  BYTE, RW, "SDMAC_SASR_B",   "WDC register index" },
+    { SDMAC_CI,       LONG, RW, "SDMAC_CI",
       "Coprocessor Interface Register" },
-    { SDMAC_CIDDR,   LONG, RW, "SDMAC_CIDDR",
+    { SDMAC_CIDDR,    LONG, RW, "SDMAC_CIDDR",
       "Coprocessor Interface Data Direction Register" },
-    { SDMAC_SSPBCTL, LONG, RW, "SDMAC_SSPBCTL",
+    { SDMAC_SSPBCTL,  LONG, RW, "SDMAC_SSPBCTL",
       "Synchronous Serial Peripheral Bus Control Register"},
-    { SDMAC_SSPBDAT, LONG, RW, "SDMAC_SSPBDAT",
+    { SDMAC_SSPBDAT,  LONG, RW, "SDMAC_SSPBDAT",
       "Synchronous Serial Peripheral Bus Data Register "},
 };
 
@@ -568,7 +572,7 @@ show_regs(void)
 {
     int pos;
     uint32_t value;
-    printf("\nREG VALUE    NAME          DESCRIPTION\n");
+    printf("\nREG VALUE    NAME           DESCRIPTION\n");
     for (pos = 0; pos < ARRAY_SIZE(sdmac_reglist); pos++) {
         if (sdmac_reglist[pos].type == WO)
             continue; // Skip this register
@@ -586,19 +590,19 @@ show_regs(void)
                 break;
         }
         SUPERVISOR_STATE_EXIT();  // Needed for RAMSEY_VER register
-        printf(" %02x %0*x%*s %-13s %s\n",
+        printf(" %02x %0*x%*s %-14s %s\n",
                sdmac_reglist[pos].addr & 0xff,
                sdmac_reglist[pos].width * 2, value,
                8 - sdmac_reglist[pos].width * 2, "",
                sdmac_reglist[pos].name, sdmac_reglist[pos].desc);
     }
 
-    printf("REG VALUE    NAME          DESCRIPTION\n");
+    printf("REG VALUE    NAME           DESCRIPTION\n");
     for (pos = 0; pos < ARRAY_SIZE(wd_reglist); pos++) {
         if (wd_reglist[pos].type == WO)
             continue; // Skip this register
         value = get_wdc_reg(wd_reglist[pos].addr);
-        printf(" %02x %0*x%*s %-13s %s",
+        printf(" %02x %0*x%*s %-14s %s",
                wd_reglist[pos].addr & 0xff,
                wd_reglist[pos].width * 2, value,
                8 - wd_reglist[pos].width * 2, "",
@@ -613,6 +617,84 @@ show_regs(void)
         }
         printf("\n");
     }
+}
+
+/* CIA_USEC rounds up 1 value to at least one CIA tick */
+#define CIA_USEC(x) (((x) * 715909 + 284091) / 1000000)
+
+#define CIAA_TBLO        ADDR8(0x00bfe601)
+#define CIAA_TBHI        ADDR8(0x00bfe701)
+
+static uint
+cia_ticks(void)
+{
+    uint8_t hi1;
+    uint8_t hi2;
+    uint8_t lo;
+
+    hi1 = *CIAA_TBHI;
+    lo  = *CIAA_TBLO;
+    hi2 = *CIAA_TBHI;
+
+    /*
+     * The below operation will provide the same effect as:
+     *     if (hi2 != hi1)
+     *         lo = 0xff;  // rollover occurred
+     */
+    lo |= (hi2 - hi1);  // rollover of hi forces lo to 0xff value
+
+    return (lo | (hi2 << 8));
+}
+
+void
+cia_spin(unsigned int ticks)
+{
+    uint16_t start = cia_ticks();
+    uint16_t now;
+    uint16_t diff;
+
+    while (ticks != 0) {
+        now = cia_ticks();
+        diff = start - now;
+        if (diff >= ticks)
+            break;
+        ticks -= diff;
+        start = now;
+        __asm__ __volatile__("nop");
+        __asm__ __volatile__("nop");
+    }
+}
+
+static void
+wdc_hard_reset(void)
+{
+    uint8_t value = *ADDR8(SDMAC_CNTR);
+    *ADDR8(SDMAC_CNTR) = 0;  // Disable interrupts
+    cia_spin(CIA_USEC(2));
+    *ADDR8(SDMAC_CNTR) = SDMAC_CONTR_RESET;
+    cia_spin(CIA_USEC(2));
+    *ADDR8(SDMAC_CNTR) = 0;
+    cia_spin(CIA_USEC(2));
+    *ADDR8(SDMAC_CNTR) = value;
+}
+
+static void
+wdc_soft_reset(void)
+{
+    uint8_t wdc_own;
+    uint8_t wdc_new_own;
+
+    wdc_new_own =  0x40 |  // Input clock divisor 3 (FS0) for 14 MHz clock
+                   0x00 |  // 0x04 to enable advanced features
+                   0x07;   // SCSI bus id
+
+    INTERRUPTS_DISABLE();
+    wdc_own = get_wdc_reg(WDC_OWN_ID);
+    set_wdc_reg(WDC_OWN_ID, wdc_new_own);
+    set_wdc_reg(WDC_CMD, WDC_CMD_RESET);
+    cia_spin(CIA_USEC(30));
+    set_wdc_reg(WDC_OWN_ID, wdc_own);
+    INTERRUPTS_ENABLE();
 }
 
 __attribute__((noinline))
@@ -734,20 +816,26 @@ show_ramsey_version(void)
 }
 
 static uint8_t sdmac_version     = 0;
-static uint8_t sdmac_version_rev = 0;
+static uint32_t sdmac_version_rev = 0;
 
 static uint
 show_dmac_version(void)
 {
     sdmac_version     = get_sdmac_version();
-    sdmac_version_rev = (sdmac_version == 4) ? *ADDR8(SDMAC_REVISION) : 0;
+    sdmac_version_rev = *ADDR32(SDMAC_REVISION);  // ReSDMAC only
 
     switch (sdmac_version) {
         case 2:
         case 4:
             printf("SCSI DMA Controller: SDMAC-%02d", sdmac_version);
-            if ((sdmac_version_rev != 0x00) && (sdmac_version_rev != 0xff))
-                printf("  Rev %02x\n", sdmac_version_rev);
+            if (((char)(sdmac_version_rev >> 24) == 'R') &&
+                ((char)(sdmac_version_rev >> 16) == 'E')) {
+                printf("  %c%c%c%c",
+                       (char) (sdmac_version_rev >> 24),
+                       (char) (sdmac_version_rev >> 16),
+                       (char) (sdmac_version_rev >> 8),
+                       (char) sdmac_version_rev);
+            }
             printf("\n");
             return (0);
         default:
@@ -1355,6 +1443,7 @@ test_wdc_access(void)
 int
 main(int argc, char **argv)
 {
+    int do_wdc_reset = 0;
     int raw_sdmac_regs = 0;
     int all_regs = 0;
     int loop_until_failure = 0;
@@ -1374,6 +1463,9 @@ main(int argc, char **argv)
                     case 'r':
                         all_regs++;
                         break;
+                    case 'R':
+                        do_wdc_reset++;
+                        break;
                     case 's':
                         raw_sdmac_regs++;
                         break;
@@ -1392,6 +1484,7 @@ usage:
             printf("%s\nOptions:\n"
                    "    -d Debug output\n"
                    "    -L Loop tests until failure\n"
+                   "    -R reset WD SCSI Controller\n"
                    "    -r Display registers\n"
                    "    -s Display raw SDMAC registers\n"
                    "    -t Force tests to run\n"
@@ -1401,6 +1494,15 @@ usage:
     }
 
     BERR_DSACK_SAVE();
+    if (do_wdc_reset) {
+        if (do_wdc_reset > 1) {
+            wdc_hard_reset();
+        } else {
+            wdc_soft_reset();
+        }
+        printf("WDC %s reset complete\n", (do_wdc_reset > 1) ? "hard" : "soft");
+        goto finish;
+    }
     if (show_ramsey_version() ||
         show_ramsey_config() ||
         show_dmac_version() ||

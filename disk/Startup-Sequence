@@ -1,0 +1,8 @@
+; Startup-Sequence
+; Copyright © 2024 Chris Hooper
+
+Path SYS:C ADD
+
+echo "Welcome to the SDMAC test utility disk"
+echo ""
+echo "For command options, type: sdmac ?"
