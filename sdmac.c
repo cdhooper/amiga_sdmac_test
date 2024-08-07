@@ -732,7 +732,7 @@ get_sdmac_version(void)
         *ADDR32(SDMAC_WTC) = wvalue;
 #define FORCE_READ(x) asm volatile ("" : : "r" (x));
         /* Push out write and buffer something else on the bus */
-        (void) *ADDR32(ROM_BASE);
+        (void) *ADDR32(RAMSEY_VER);
         rvalue = *ADDR32(SDMAC_WTC);
         *ADDR32(SDMAC_WTC) = ovalue;
         INTERRUPTS_ENABLE();
@@ -751,8 +751,13 @@ get_sdmac_version(void)
             /* SDMAC-02 */
         } else if ((rvalue & BIT(2)) == 0) {
             /* SDMAC-04 possibly */
-            if (wvalue & BIT(2))
+            if (wvalue & BIT(2)) {
+                /*
+                 * XXX: This should really run through all pattern
+                 *      values before determining that it's SDMAC-04.
+                 */
                 return (4);  // SDMAC-04 BIT(2) is always 0
+            }
         } else {
             sdmac_fail_reason = "bit corruption in WTC register";
             if (flag_debug) {
@@ -1211,11 +1216,12 @@ test_sdmac_wtc(void)
     uint32_t wvalue;
 
     INTERRUPTS_DISABLE();
-    ovalue = *ADDR32(SDMAC_WTC);
+    ovalue = *ADDR32(SDMAC_WTC_ALT);
     for (pos = 0; pos < ARRAY_SIZE(test_values); pos++) {
         wvalue = test_values[pos] & 0x00ffffff;
         *ADDR32(SDMAC_WTC_ALT) = wvalue;
-        (void) *ADDR32(ROM_BASE);  // flush bus access
+//      (void) *ADDR32(ROM_BASE);  // flush bus access
+        (void) *ADDR32(RAMSEY_VER);
         rvalue = *ADDR32(SDMAC_WTC) & 0x00ffffff;
         if (rvalue != wvalue) {
             *ADDR32(SDMAC_WTC_ALT) = ovalue;
@@ -1224,7 +1230,7 @@ test_sdmac_wtc(void)
                 printf("FAIL\n");
             printf("  SDMAC WTC %08x != expected %08x\n", rvalue, wvalue);
             INTERRUPTS_DISABLE();
-            ovalue = *ADDR32(SDMAC_WTC);
+            ovalue = *ADDR32(SDMAC_WTC_ALT);
         }
     }
     *ADDR32(SDMAC_WTC_ALT) = ovalue;
