@@ -17,9 +17,9 @@ CFLAGS  := -Wall -Wno-pointer-sign -Os
 
 CFLAGS += -fomit-frame-pointer
 
-#LDFLAGS := -Xlinker -Map=$(PROG).map -noixemul
-#LDFLAGS = -Xlinker -Map=$@.map -mcrt=clib2 -lnet
-LDFLAGS = -Xlinker -Map=$@.map -Wa,-a > $@.lst -mcrt=clib2
+# clib2 crashes on exit under Kickstart 2.x
+#LDFLAGS = -Xlinker -Map=$@.map -Wa,-a > $@.lst -mcrt=clib2
+LDFLAGS = -Xlinker -Map=$@.map -Wa,-a > $@.lst -noixemul
 
 #CFLAGS += -g
 #LDFLAGS += -g
