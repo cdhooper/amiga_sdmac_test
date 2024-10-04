@@ -1,5 +1,5 @@
 /*
- * SDMAC  Version 0.7 2024-09-21
+ * SDMAC  Version 0.8 2024-10-03
  * -----------------------------
  * Utility to inspect and test an Amiga 3000's Super DMAC (SDMAC) and
  * WD SCSI controller for correct configuration and operation.
@@ -14,7 +14,7 @@
  * THE AUTHOR ASSUMES NO LIABILITY FOR ANY DAMAGE ARISING OUT OF THE USE
  * OR MISUSE OF THIS UTILITY OR INFORMATION REPORTED BY THIS UTILITY.
  */
-const char *version = "\0$VER: SDMAC 0.7 ("__DATE__") © Chris Hooper";
+const char *version = "\0$VER: SDMAC 0.8 ("__DATE__") © Chris Hooper";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -212,6 +212,7 @@ typedef unsigned int uint;
 static uint8_t     irq_disabled      = 0;
 static uint8_t     flag_debug        = 0;
 static const char *sdmac_fail_reason = "";
+static uint        wdc_khz;
 
 #define DUMP_WORDS_AND_LONGS
 #ifdef DUMP_WORDS_AND_LONGS
@@ -1093,17 +1094,16 @@ scsi_soft_reset(uint enhanced_features)
 #endif
     set_wdc_reg(WDC_SYNC_TX, 0);
 
+    INTERRUPTS_ENABLE();
+
     if (auxst == 0x100) {
         if (irq_disabled)
             Enable();
         printf("reset timeout\n");
         if (irq_disabled)
             Disable();
-    }
-
-    INTERRUPTS_ENABLE();
-    if (auxst == 0x100)
         return (1);
+    }
     return (0);
 }
 
@@ -1318,10 +1318,8 @@ static uint    wd_level = LEVEL_WD33C93;
 
 static uint8_t wdc_regs_saved = 0;
 static uint8_t wdc_regs_store[32];
-#define WDC_SAVE_MASK (WDC_OWN_ID | WDC_CONTROL | WDC_TPERIOD | \
-                       WDC_CDB1 | WDC_CDB2 | \
-                       WDC_CMDPHASE | WDC_SYNC_TX | \
-                       WDC_TCOUNT2 | WDC_TCOUNT1 | WDC_TCOUNT0)
+#define WDC_SAVE_MASK (BIT(WDC_OWN_ID) | BIT(WDC_CONTROL) | BIT(WDC_TPERIOD) | \
+                       BIT(WDC_CMDPHASE) | BIT(WDC_SYNC_TX))
 
 static void
 scsi_save_regs(void)
@@ -1344,6 +1342,133 @@ scsi_restore_regs(void)
                 set_wdc_reg(pos, wdc_regs_store[pos]);
         }
     }
+}
+
+/*
+ * calc_wdc_clock
+ * --------------
+ * This function forces a SCSI timeout. When measured, the SCSI input
+ * clock can be determined based on how long it takes for the SCSI timeout.
+ * It returns the measured clock speed in KHz.
+ */
+static uint
+calc_wdc_clock(void)
+{
+    uint16_t ticks;
+    uint treg;
+#undef DEBUG_CALC_WDC_LOCK
+#ifdef DEBUG_CALC_WDC_LOCK
+    uint auxst;
+#endif
+    uint sstat;
+    uint efreq;
+    uint count = 200000;
+    struct EClockVal now;
+
+    INTERRUPTS_DISABLE();
+    scsi_wait_cip();
+    scsi_soft_reset(0);  // set the clock divisor to 3
+
+    sstat = get_wdc_reg(WDC_SCSI_STAT);  // clear reset status
+    if (sstat == 0xff)
+        return (0);  // timeout
+
+    /* Perform a select to ID 7 LUN 7 (should cause timeout) */
+    set_wdc_reg(WDC_DST_ID, 7);
+    set_wdc_reg(WDC_LUN, 7);
+    set_wdc_reg(WDC_SYNC_TX, 0);  // async
+    set_wdc_reg(WDC_CONTROL, WDC_CONTROL_IDI | WDC_CONTROL_EDI);  // No DMA
+
+    /*
+     * Timeout Register = Tper * Ficlk / 80
+     *                    Ficlk = input clock in MHz
+     *                    Tper  = timeout period in milliseconds
+     *
+     *     Reg = Tper * Ficlk / 80
+     *     Ficlk = Treg * 80 / Tper
+     *
+     * efreq = CIA ticks / second
+     * ticks = CIA ticks per timeout
+     * Tper = 1000 * ticks / efreq
+     *
+     * Ficlk = Treg * 80 / Tper
+     * Ficlk = Treg * 80 / 1000 / ticks * efreq
+     * Ficlk = efreq * Treg * 80 / 1000 / ticks
+     * FiclkKHz = efreq * Treg * 80 / ticks
+     *
+     * timeoutspersec = efreq / ticks
+     * SCSI clk = timeoutspersec * 80 * 100
+     */
+    treg = 10;  // any higher and there is risk of CIA timer rollover
+    set_wdc_reg(WDC_TPERIOD, treg);
+    (void) cia_ticks();
+
+    /* Start select and wait for it to start */
+    set_wdc_reg(WDC_CMD, WDC_CMD_SELECT_WITH_ATN);
+    (void) scsi_wait_cip();
+
+    /* Wait for select to timeout */
+    ticks = cia_ticks();
+    while ((*ADDR8(SDMAC_ISTR) & SDMAC_ISTR_INT_S) == 0)
+        if (--count == 0)
+            break;  // timeout
+
+    ticks -= cia_ticks();  // ticks count down, not up
+
+    /*
+     * Hack: Compensate for microcode execution runtime
+     *       There are minor variations in command processing time between
+     *       WD33C93A 00-04, 00-06, and 00-08, but they are small enough
+     *       to not affect the reported speed by even 1%.
+     */
+    switch (wd_level) {
+        default:
+        case LEVEL_WD33C93:
+            ticks -= 292;  // ~400 usec
+            break;
+        case LEVEL_WD33C93A:
+            ticks -= 380;  // ~530 usec
+            break;
+        case LEVEL_WD33C93B:
+            ticks -= 260;  // ~360 usec
+            break;
+    }
+
+#ifdef DEBUG_CALC_WDC_LOCK
+    auxst = scsi_wait(WDC_AUXST_LCI | WDC_AUXST_INT, 1);
+    sstat = get_wdc_reg(WDC_SCSI_STAT);
+#endif
+
+    scsi_soft_reset(0);  // set the clock divisor to 3
+    INTERRUPTS_ENABLE();
+
+    if (count == 0)
+        return (0);
+
+    if (TimerBase == NULL)
+        TimerBase = (struct Device *) FindName(&SysBase->DeviceList, TIMERNAME);
+    efreq = ReadEClock(&now);
+
+    /*
+     * efreq = CIA ticks / second
+     * ticks = CIA ticks per timeout
+     * Tper = 1000 * ticks / efreq
+     * Ficlk = Treg * 80 / Tper
+     * Ficlk = Treg * 80 / 1000 / ticks * efreq
+     * Ficlk = efreq * Treg * 80 / 1000 / ticks
+     * FiclkKHz = efreq * Treg * 80 / ticks
+     *
+     * timeoutspersec = efreq / ticks
+     * SCSI clk = timeoutspersec * 80 * 100
+     */
+#ifdef DEBUG_CALC_WDC_LOCK
+    printf("auxst=%x sstat=%x\n", auxst, sstat);
+    printf("wdc clock ticks = %u\n", ticks);
+    printf("Eclk=%u Hz\n", efreq);
+    printf("timeouts/sec=%u\n", efreq / ticks);
+    printf("SCSI clk=%u\n", efreq * treg * 80 / ticks);
+#endif
+    return (efreq * treg * 80 / ticks);
 }
 
 #define WD_DETECT_ERR_INVALID        0x0001
@@ -1452,7 +1577,6 @@ show_wdc_version(void)
      * If the SCSI Status Register has a value of 0x01, then
      * the WD33C93A or WD33C93B is present.
      */
-    scsi_save_regs();
     scsi_soft_reset(1);
     rvalue = get_wdc_reg(WDC_SCSI_STAT);
     if (rvalue == 0x00) {
@@ -1534,7 +1658,6 @@ show_wdc_version(void)
         wd_rev_value = get_wdc_reg(WDC_CDB1);
     }
     scsi_soft_reset(0);
-    scsi_restore_regs();
 
     if (wd_level == LEVEL_WD33C93A) {
         switch (wd_rev_value) {
@@ -1568,148 +1691,25 @@ fail:
                 printf(" SCSI_STAT");
             if (errs & WD_DETECT_ERR_RESET_STATUS)
                 printf(" RESET_STATUS");
-            printf("\n");
             break;
         case LEVEL_WD33C93:
-            printf("WD33C93\n");
+            printf("WD33C93");
             break;
         case LEVEL_WD33C93A:
-            printf("WD33C93A%s microcode %02x\n", wd_rev, wd_rev_value);
+            printf("WD33C93A%s microcode %02x", wd_rev, wd_rev_value);
             break;
         case LEVEL_WD33C93B:
-            printf("WD33C93B microcode %02x\n", wd_rev_value);
+            printf("WD33C93B microcode %02x", wd_rev_value);
             break;
     }
+    if (wd_level != LEVEL_UNKNOWN) {
+        wdc_khz = calc_wdc_clock() + 50;
+        if (wdc_khz >= 1000) {
+            printf(", %u.%u MHz", wdc_khz / 1000, (wdc_khz % 1000) / 100);
+        }
+    }
+    printf("\n");
     return (errs);
-}
-
-/*
- * calc_wdc_clock
- * --------------
- * This function forces a SCSI timeout. When measured, the SCSI input
- * clock can be determined based on how long it takes for the SCSI timeout.
- * It returns the measured clock speed in KHz.
- */
-static uint
-calc_wdc_clock(void)
-{
-    uint16_t ticks;
-    uint treg;
-#undef DEBUG_CALC_WDC_LOCK
-#ifdef DEBUG_CALC_WDC_LOCK
-    uint auxst;
-#endif
-    uint sstat;
-    uint efreq;
-    uint count = 200000;
-    struct EClockVal now;
-
-    INTERRUPTS_DISABLE();
-    scsi_wait_cip();
-    scsi_save_regs();
-    scsi_soft_reset(0);  // set the clock divisor to 3
-
-    sstat = get_wdc_reg(WDC_SCSI_STAT);  // clear reset status
-    if (sstat == 0xff)
-        return (0);  // timeout
-
-    /* Perform a select to ID 7 LUN 7 (should cause timeout) */
-    set_wdc_reg(WDC_DST_ID, 7);
-    set_wdc_reg(WDC_LUN, 7);
-    set_wdc_reg(WDC_SYNC_TX, 0);  // async
-    set_wdc_reg(WDC_CONTROL, WDC_CONTROL_IDI | WDC_CONTROL_EDI);  // No DMA
-
-    /*
-     * Timeout Register = Tper * Ficlk / 80
-     *                    Ficlk = input clock in MHz
-     *                    Tper  = timeout period in milliseconds
-     *
-     *     Reg = Tper * Ficlk / 80
-     *     Ficlk = Treg * 80 / Tper
-     *
-     * efreq = CIA ticks / second
-     * ticks = CIA ticks per timeout
-     * Tper = 1000 * ticks / efreq
-     *
-     * Ficlk = Treg * 80 / Tper
-     * Ficlk = Treg * 80 / 1000 / ticks * efreq
-     * Ficlk = efreq * Treg * 80 / 1000 / ticks
-     * FiclkKHz = efreq * Treg * 80 / ticks
-     *
-     * timeoutspersec = efreq / ticks
-     * SCSI clk = timeoutspersec * 80 * 100
-     */
-    treg = 10;  // any higher and there is risk of CIA timer rollover
-    set_wdc_reg(WDC_TPERIOD, treg);
-    (void) cia_ticks();
-
-    /* Start select and wait for it to start */
-    set_wdc_reg(WDC_CMD, WDC_CMD_SELECT_WITH_ATN);
-    (void) scsi_wait_cip();
-
-    /* Wait for select to timeout */
-    ticks = cia_ticks();
-    while ((*ADDR8(SDMAC_ISTR) & SDMAC_ISTR_INT_S) == 0)
-        if (--count == 0)
-            break;  // timeout
-
-    ticks -= cia_ticks();  // ticks count down, not up
-
-    /*
-     * Hack: Compensate for microcode execution runtime
-     *       There are minor variations in command processing time between
-     *       WD33C93A 00-04, 00-06, and 00-08, but they are small enough
-     *       to not affect the reported speed by even 1%.
-     */
-    switch (wd_level) {
-        default:
-        case LEVEL_WD33C93:
-            ticks -= 292;  // ~400 usec
-            break;
-        case LEVEL_WD33C93A:
-            ticks -= 380;  // ~530 usec
-            break;
-        case LEVEL_WD33C93B:
-            ticks -= 260;  // ~360 usec
-            break;
-    }
-
-#ifdef DEBUG_CALC_WDC_LOCK
-    auxst = scsi_wait(WDC_AUXST_LCI | WDC_AUXST_INT, 1);
-    sstat = get_wdc_reg(WDC_SCSI_STAT);
-#endif
-
-    scsi_soft_reset(0);  // set the clock divisor to 3
-    scsi_restore_regs();
-    INTERRUPTS_ENABLE();
-
-    if (count == 0)
-        return (0);
-
-    if (TimerBase == NULL)
-        TimerBase = (struct Device *) FindName(&SysBase->DeviceList, TIMERNAME);
-    efreq = ReadEClock(&now);
-
-    /*
-     * efreq = CIA ticks / second
-     * ticks = CIA ticks per timeout
-     * Tper = 1000 * ticks / efreq
-     * Ficlk = Treg * 80 / Tper
-     * Ficlk = Treg * 80 / 1000 / ticks * efreq
-     * Ficlk = efreq * Treg * 80 / 1000 / ticks
-     * FiclkKHz = efreq * Treg * 80 / ticks
-     *
-     * timeoutspersec = efreq / ticks
-     * SCSI clk = timeoutspersec * 80 * 100
-     */
-#ifdef DEBUG_CALC_WDC_LOCK
-    printf("auxst=%x sstat=%x\n", auxst, sstat);
-    printf("wdc clock ticks = %u\n", ticks);
-    printf("Eclk=%u Hz\n", efreq);
-    printf("timeouts/sec=%u\n", efreq / ticks);
-    printf("SCSI clk=%u\n", efreq * treg * 80 / ticks);
-#endif
-    return (efreq * treg * 80 / ticks);
 }
 
 static uint
@@ -1718,21 +1718,31 @@ show_wdc_config(void)
     const uint inclk_pal  = 28375 / 2;   // PAL frequency  28.37516 MHz
     const uint inclk_ntsc = 28636 / 2;   // NTSC frequency 28.63636 MHz
     uint       inclk      = inclk_ntsc;  // WD33C93A has ~14MHz clock on A3000
-    uint       control    = get_wdc_reg(WDC_CONTROL);
-    uint       tperiod    = get_wdc_reg(WDC_TPERIOD);
-    uint       syncreg    = get_wdc_reg(WDC_SYNC_TX);
-    uint       tperiodms  = tperiod * 80 * 1000 / inclk;
+    uint       control    = wdc_regs_store[WDC_CONTROL];
+    uint       tperiod    = wdc_regs_store[WDC_TPERIOD];
+    uint       syncreg    = wdc_regs_store[WDC_SYNC_TX];
+    uint       tperiodms;
     uint       fsel_div   = 3;  // Assumption good for A3000 only (12-15 MHz)
     uint       sync_tcycles;
     uint       syncoff;
-    uint       wdc_khz  = calc_wdc_clock() + 50;
 
-    if (0)
+    if ((wdc_khz > 14000) && (wdc_khz < 14250))
         inclk = inclk_pal;
+    else if ((wdc_khz >= 14250) && (wdc_khz < 14450))
+        inclk = inclk_ntsc;
+    else
+        inclk = wdc_khz;
+    tperiodms  = tperiod * 80 * 1000 / inclk;
 #if 0
     /*
      * Unfortunately the FSEL bits are only valid across a reset.
      * After that, the register may be used for SCSI CBD size.
+     *
+     * We could probably determine what FSEL was set to by first
+     * forcing a timeout of a specific period, and measuring how long
+     * that took, then calculate the SCSI clock using our own
+     * FSEL, and then from that would be able to report what FSEL
+     * was originally programmed to.
      */
     uint own_id   = get_wdc_reg(WDC_OWN_ID);
     uint fsel     = own_id >> 6;
@@ -1756,8 +1766,6 @@ show_wdc_config(void)
 #endif
 
     printf("WDC Configuration:   ");
-    if (wdc_khz >= 1000)
-        printf("%u.%u MHz, ", wdc_khz / 1000, (wdc_khz % 1000) / 100);
 
     switch (control >> 5) {
         case 0:  printf("Polled Mode"); break;
@@ -2579,6 +2587,7 @@ usage:
         }
     }
     BERR_DSACK_SAVE();
+    scsi_save_regs();
     if (all_regs)
         goto finish;  // Do not probe or perform tests
     if (readwrite_wdc_reg)
@@ -2639,6 +2648,9 @@ finish:
         get_raw_regs();
         dump_raw_sdmac_regs();
     }
+    INTERRUPTS_DISABLE();
+    scsi_restore_regs();
+    INTERRUPTS_ENABLE();
     BERR_DSACK_RESTORE();
     if (loop_until_failure)
         printf("%s at pass %u\n", is_user_abort() ? "Stopped" : "Failed", pass);

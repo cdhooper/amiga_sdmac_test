@@ -11,12 +11,13 @@ It can be built using the [amigadev/crosstools](https://hub.docker.com/r/amigade
 Example output
 
 <PRE>
-9.OS322:> sdmac
+8.OS322:> sdmac
 Memory controller:   Ramsey-07 $f
-Ramsey config:       1Mx4, 238 clock refresh
+Ramsey config:       Burst Mode, 1Mx4, 238 clock refresh
+                     Static Column RAM required
 SCSI DMA Controller: SDMAC-02
-SCSI Controller:     WD33C93A 00-08 microcode 09
-WDC Configuration:   14.3 MHz, Polled Mode, 245 msec timeout, Async
+SCSI Controller:     WD33C93A 00-08 microcode 09, 14.3 MHz
+WDC Configuration:   DMA Mode, 245 msec timeout, Offset 12, Sync 4.772 MHz
 
 Ramsey test:  PASS
 SDMAC test:   PASS
