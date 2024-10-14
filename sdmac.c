@@ -14,7 +14,7 @@
  * THE AUTHOR ASSUMES NO LIABILITY FOR ANY DAMAGE ARISING OUT OF THE USE
  * OR MISUSE OF THIS UTILITY OR INFORMATION REPORTED BY THIS UTILITY.
  */
-const char *version = "\0$VER: SDMAC 0.8 ("__DATE__") © Chris Hooper";
+const char *version = "\0$VER: SDMAC 0.8 ("__DATE__") ï¿½ Chris Hooper";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1237,14 +1237,11 @@ show_dmac_version(void)
         case 2:
         case 4:
             printf("SCSI DMA Controller: SDMAC-%02d", sdmac_version);
-            if (((char)(sdmac_version_rev >> 24) == 'R') &&
-                ((char)(sdmac_version_rev >> 16) == 'E')) {
-                printf("  %c%c%c%c",
-                       (char) (sdmac_version_rev >> 24),
-                       (char) (sdmac_version_rev >> 16),
-                       (char) (sdmac_version_rev >> 8),
-                       (char) sdmac_version_rev);
-            }
+            printf("  %c%c%c%c",
+                    (char) (sdmac_version_rev >> 24),
+                    (char) (sdmac_version_rev >> 16),
+                    (char) (sdmac_version_rev >> 8),
+                    (char) sdmac_version_rev);
             printf("\n");
             return (0);
         default:
