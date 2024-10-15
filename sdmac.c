@@ -1237,11 +1237,19 @@ show_dmac_version(void)
         case 2:
         case 4:
             printf("SCSI DMA Controller: SDMAC-%02d", sdmac_version);
-            printf("  %c%c%c%c",
-                    (char) (sdmac_version_rev >> 24),
-                    (char) (sdmac_version_rev >> 16),
-                    (char) (sdmac_version_rev >> 8),
-                    (char) sdmac_version_rev);
+            if ((sdmac_version == 4) && ((sdmac_version_rev >> 24) == 'v')) {
+                /*
+                 * XXX: Could also key off SSPBDAT as a differentiator for
+                 *      ReSDMAC. According to the A3000+ docs, it may be only
+                 *      the lower 11 bits of SSPBDAT which are r/w on SDMAC-04.
+                 *      ReSDMAC implements all 32 bits as r/w.
+                 */
+                printf("  %c%c%c%c",
+                        (char) (sdmac_version_rev >> 24),
+                        (char) (sdmac_version_rev >> 16),
+                        (char) (sdmac_version_rev >> 8),
+                        (char) sdmac_version_rev);
+            }
             printf("\n");
             return (0);
         default:
@@ -2156,6 +2164,12 @@ scsi_disconnect_msg(void)
 }
 #endif
 
+/*
+ * scsi_abort()
+ *
+ * XXX: According to the WD33C93A E062-B @9, the Abort command is
+ *      no longer supported in the initiator mode.
+ */
 void
 scsi_abort(void)
 {
