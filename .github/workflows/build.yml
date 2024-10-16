@@ -1,6 +1,7 @@
 name: Build SDMAC
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - master
