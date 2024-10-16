@@ -4,9 +4,9 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "MakeAll",
+            "label": "Make All",
             "type": "shell",
-            "command": "docker run  --rm -v ${PWD}:/work -it  amigadev/crosstools:m68k-amigaos make all",
+            "command": "docker run --rm -v ${PWD}:/host -it -w /host liv2/amiga-gcc-amitools make all",
             "problemMatcher": [],
             "group": {
                 "kind": "build",
@@ -14,9 +14,9 @@
             }
         },
         {
-            "label": "MakeClean",
+            "label": "Make Clean",
             "type": "shell",
-            "command": "docker run  --rm -v ${PWD}:/work -it  amigadev/crosstools:m68k-amigaos make clean",
+            "command": "docker run --rm -v ${PWD}:/host -it -w /host liv2/amiga-gcc-amitools make clean",
             "problemMatcher": [],
             "group": {
                 "kind": "build",
