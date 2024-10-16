@@ -1,0 +1,42 @@
+name: Generate release files
+
+permissions:
+  contents: write
+on:
+  push:
+    tags:
+      - "Release_**"
+  workflow_dispatch:
+
+jobs:
+  make_software:
+    runs-on: ubuntu-latest
+    container: ghcr.io/mbtaylor1982/container-amiga-gcc-amitools:latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+      - name: Get the tag / version
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/release_}" >> $GITHUB_OUTPUT
+      - name: Invoke Makefile
+        run: make all lha adf zip VER=${{ steps.version.outputs.version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: software
+          path: |
+            *.lha
+            *.adf
+            *.zip
+          if-no-files-found: error
+      - name: Create a new GitHub release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/release_')
+        with:
+            draft: true
+            body: |
+              sdmac test utility ${{ steps.version.outputs.version }} release
+            files: |
+              *.lha
+              *.adf
+              *.zip
