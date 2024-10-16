@@ -1,0 +1,15 @@
+name: Build SDMAC
+
+on:
+  push:
+    branches:
+      - master
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: liv2/amiga-gcc-amitools
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Invoke Makefile
+        run: make all
