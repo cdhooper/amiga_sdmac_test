@@ -5,9 +5,7 @@ permissions:
 on:
   push:
     tags:
-      - "Release_**"
-  workflow_dispatch:
-
+      - "release_*"
 jobs:
   make_software:
     runs-on: ubuntu-latest
@@ -17,11 +15,12 @@ jobs:
         uses: actions/checkout@v4
       - name: Get the tag / version
         id: version
+        if: startsWith(github.ref, 'refs/tags/release_')
         run: echo "version=${GITHUB_REF#refs/tags/release_}" >> $GITHUB_OUTPUT
       - name: Invoke Makefile
         run: make all lha adf zip VER=${{ steps.version.outputs.version }}
-
-      - uses: actions/upload-artifact@v4
+      - name: upload build artifacts
+        uses: actions/upload-artifact@v4
         with:
           name: software
           path: |
