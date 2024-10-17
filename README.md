@@ -1,5 +1,7 @@
 # Amiga 3000 SDMAC and WD33C93A register test utility
 
+![SDMAC Test Tool Build](https://github.com/mbtaylor1982/amiga_sdmac_test/actions/workflows/build.yml/badge.svg)
+
 This is a small utility which can identify the Amiga 3000 SDMAC version
 and talk through the SDMAC to read WD33C93A registers and identify that
 chip as well.
