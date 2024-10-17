@@ -1,12 +1,13 @@
 # Amiga 3000 SDMAC and WD33C93A register test utility
 
-![SDMAC Test Tool Build](https://github.com/mbtaylor1982/amiga_sdmac_test/actions/workflows/build.yml/badge.svg)
+![SDMAC Test Tool Build](https://github.com/cdhooper/amiga_sdmac_test/actions/workflows/build.yml/badge.svg)
 
-This is a small utility which can identify the Amiga 3000 SDMAC version
-and talk through the SDMAC to read WD33C93A registers and identify that
-chip as well.
+This is a utility which can identify the Amiga 3000 SDMAC version and
+talk through the SDMAC to read WD33C93A registers and identify that
+chip and configuration as well. Ramsey version and configuration are
+also reported.
 
-The code can be compiled using the VSCode with dev containers and Docker, or can be built using Bebbo's gcc Amiga cross-compiler in a local Linux environment.
+The code can be compiled using VSCode with dev containers and Docker, or can be built using Bebbo's gcc Amiga cross-compiler in a local Linux environment.
 
 -------------------------------------------------------
 
