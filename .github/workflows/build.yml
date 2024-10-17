@@ -1,7 +1,6 @@
 name: Build SDMAC
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - master
@@ -11,6 +10,6 @@ jobs:
     container: ghcr.io/mbtaylor1982/container-amiga-gcc-amitools:latest
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Invoke Makefile
         run: make all lha adf zip

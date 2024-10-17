@@ -6,7 +6,7 @@
         {
             "label": "Make All",
             "type": "shell",
-            "command": "docker run --rm -v ${PWD}:/host -it -w /host ghcr.io/mbtaylor1982/container-amiga-gcc-amitools:latest make all lha adf zip",
+            "command": "make all lha adf zip",
             "problemMatcher": [],
             "group": {
                 "kind": "build",
@@ -16,7 +16,7 @@
         {
             "label": "Make Clean",
             "type": "shell",
-            "command": "docker run --rm -v ${PWD}:/host -it -w /host ghcr.io/mbtaylor1982/container-amiga-gcc-amitools:latest make clean",
+            "command": "make clean",
             "problemMatcher": [],
             "group": {
                 "kind": "build",
