@@ -6,14 +6,15 @@
 #
 PROGS   := sdmac
 
-VER := $(shell awk '/\$$VER:/{print $$7}' sdmac.c)
+VER ?= 0.9+
+#VER := $(shell awk '/\$$VER:/{print $$7}' sdmac.c)
 ADF_FILE := sdmac_$(VER).adf
 ZIP_FILE := sdmac_$(VER).zip
 LHA_FILE := sdmac_$(VER).lha
 ARC_DIR  := sdmac_$(VER)
 
 CC      := m68k-amigaos-gcc
-CFLAGS  := -Wall -Wno-pointer-sign -Os
+CFLAGS  := -Wall -Wno-pointer-sign -Os -DVER=\"$(VER)\"
 
 CFLAGS += -fomit-frame-pointer
 

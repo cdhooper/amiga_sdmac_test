@@ -1,5 +1,5 @@
 /*
- * SDMAC  Version 0.8 2024-10-03
+ * SDMAC  Version 0.9 2024-10-17
  * -----------------------------
  * Utility to inspect and test an Amiga 3000's Super DMAC (SDMAC) and
  * WD SCSI controller for correct configuration and operation.
@@ -14,7 +14,7 @@
  * THE AUTHOR ASSUMES NO LIABILITY FOR ANY DAMAGE ARISING OUT OF THE USE
  * OR MISUSE OF THIS UTILITY OR INFORMATION REPORTED BY THIS UTILITY.
  */
-const char *version = "\0$VER: SDMAC 0.8 ("__DATE__") � Chris Hooper";
+const char *version = "\0$VER: SDMAC " VER " ("__DATE__") � Chris Hooper";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1237,8 +1237,11 @@ show_dmac_version(void)
         case 2:
         case 4:
             printf("SCSI DMA Controller: SDMAC-%02d", sdmac_version);
-            if ((sdmac_version == 4) && ((sdmac_version_rev >> 24) == 'v')) {
+            if ((sdmac_version == 4) && ((sdmac_version_rev >> 24) == 'v') &&
+                (((sdmac_version_rev >> 8) & 0xff) == '.')) {
                 /*
+                 * SDMAC_REVISION is in the format: 'v' <major> '.' <minor>
+                 *
                  * XXX: Could also key off SSPBDAT as a differentiator for
                  *      ReSDMAC. According to the A3000+ docs, it may be only
                  *      the lower 11 bits of SSPBDAT which are r/w on SDMAC-04.
