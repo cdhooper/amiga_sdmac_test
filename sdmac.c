@@ -2518,6 +2518,7 @@ main(int argc, char **argv)
     int flag_force_test = 0;
     int arg;
     uint pass = 0;
+    uint exit_status = 0;
 
     for (arg = 1; arg < argc; arg++) {
         char *ptr = argv[arg];
@@ -2631,10 +2632,12 @@ usage:
             (test_ramsey_access() +
              test_sdmac_access() +
              test_wdc_access() > 0)) {
+            exit_status = 1;
             break;
         }
         if (probe_scsi_bus &&
             probe_scsi()) {
+            exit_status = 1;
             break;
         }
         if (do_wdc_reset) {
@@ -2650,6 +2653,7 @@ usage:
         }
         if (is_user_abort()) {
             printf("^C Abort\n");
+            exit_status = 1;
             break;
         }
     } while (loop_until_failure);
@@ -2669,5 +2673,5 @@ finish:
     if (loop_until_failure)
         printf("%s at pass %u\n", is_user_abort() ? "Stopped" : "Failed", pass);
 
-    exit(0);
+    exit(exit_status);
 }
