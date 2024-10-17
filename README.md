@@ -4,7 +4,7 @@ This is a small utility which can identify the Amiga 3000 SDMAC version
 and talk through the SDMAC to read WD33C93A registers and identify that
 chip as well.
 
-The code can be compiled using the [container-amiga-gcc-amitools](https://github.com/mbtaylor1982/container-amiga-gcc-amitools/pkgs/container/container-amiga-gcc-amitools) with Docker and VSCode or can be built using Bebbo's gcc Amiga cross-compiler in a local Linux environment.
+The code can be compiled using the VSCode with dev containers and Docker, or can be built using Bebbo's gcc Amiga cross-compiler in a local Linux environment.
 
 -------------------------------------------------------
 
@@ -24,7 +24,7 @@ SDMAC test:   PASS
 WDC test:     PASS
 ```
 
-----
+-------------------------------------------------------
 
 For more information on WD33C93 and compatible chips, including high resolution photos of chip packages, see the following: [http://eebugs.com/scsi/wd33c93/](http://eebugs.com/scsi/wd33c93/)
 
