@@ -2,3 +2,6 @@ sdmac
 *.swp
 *.lst
 *.map
+*.adf
+*.zip
+*.lha
