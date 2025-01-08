@@ -9,9 +9,21 @@ also reported.
 
 The code can be compiled using VSCode with dev containers and Docker, or can be built using Bebbo's gcc Amiga cross-compiler in a local Linux environment.
 
--------------------------------------------------------
+## Usage
+`> sdmac [options]`
 
-## Example output
+Options:
+
+- -d Debug output
+- -L Loop tests until failure
+- -p probe SCSI bus (not well-tested)
+- -R reset WD SCSI Controller
+- -r \[\<reg\> \[\<value\>\]\] Display/change WDC registers
+- -s Display raw SDMAC registers
+- -t Force tests to run
+- -v Display program version
+
+## Output
 
 ```console
 8.OS322:> sdmac
@@ -27,13 +39,13 @@ SDMAC test:   PASS
 WDC test:     PASS
 ```
 
--------------------------------------------------------
+## Other useful info
 
 For more information on WD33C93 and compatible chips, including high resolution photos of chip packages, see the following: [http://eebugs.com/scsi/wd33c93/](http://eebugs.com/scsi/wd33c93/)
 
 Actual samples from my part stock
 
-| chip       |       | mcode | datecode                                 |
+| chip       |       | μ code | datecode                                 |
 | ---------- | ----- | ----- | ---------------------------------------- |
 | WD33C93    | 00-02 | 00    | 8849 115315200102                        |
 | WD33C93A   | 00-03 | 00    | 8909                                     |
