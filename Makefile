@@ -6,7 +6,7 @@
 #
 PROGS   := sdmac
 
-VER ?= 0.9+
+VER ?= 1.0+
 #VER := $(shell awk '/\$$VER:/{print $$7}' sdmac.c)
 ADF_FILE := sdmac_$(VER).adf
 ZIP_FILE := sdmac_$(VER).zip

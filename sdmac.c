@@ -1,5 +1,5 @@
 /*
- * SDMAC  Version 0.9 2024-10-17
+ * SDMAC  Version 1.0 2025-09-22
  * -----------------------------
  * Utility to inspect and test an Amiga 3000's Super DMAC (SDMAC) and
  * WD SCSI controller for correct configuration and operation.
@@ -1139,13 +1139,13 @@ get_sdmac_version(void)
         }
 
         INTERRUPTS_DISABLE();
-        ovalue = *ADDR32(SDMAC_WTC);
-        *ADDR32(SDMAC_WTC) = wvalue;
+        ovalue = *ADDR32(SDMAC_WTC_ALT);
+        *ADDR32(SDMAC_WTC_ALT) = wvalue;
 #define FORCE_READ(x) asm volatile ("" : : "r" (x));
         /* Push out write and buffer something else on the bus */
         (void) *ADDR32(RAMSEY_VER);
         rvalue = *ADDR32(SDMAC_WTC);
-        *ADDR32(SDMAC_WTC) = ovalue;
+        *ADDR32(SDMAC_WTC_ALT) = ovalue;
         INTERRUPTS_ENABLE();
 
         if (flag_debug)
