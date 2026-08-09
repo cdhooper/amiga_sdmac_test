@@ -1,6 +1,6 @@
 /*
- * SDMAC  Version 1.0 2025-09-22
- * -----------------------------
+ * SDMAC
+ * -----
  * Utility to inspect and test an Amiga 3000's Super DMAC (SDMAC) and
  * WD SCSI controller for correct configuration and operation.
  *
@@ -211,6 +211,7 @@ typedef unsigned int uint;
 
 static uint8_t     irq_disabled      = 0;
 static uint8_t     flag_debug        = 0;
+static uint8_t     no_sdmac_detected = 0;
 static const char *sdmac_fail_reason = "";
 static uint        wdc_khz;
 
@@ -1113,9 +1114,11 @@ get_sdmac_version(void)
 {
     uint32_t ovalue;
     uint32_t rvalue;
+    uint32_t origval;
     uint8_t  istr = *ADDR8(SDMAC_ISTR);
     uint     pass;
     uint     sdmac_version = 2;
+    uint     origval_count = 0;
 
     sdmac_fail_reason = "";
     if ((istr & SDMAC_ISTR_FIFOE) && (istr & SDMAC_ISTR_FIFOF)) {
@@ -1125,6 +1128,7 @@ get_sdmac_version(void)
         return (0);  // Can not be both full and empty
     }
 
+    origval = *ADDR32(SDMAC_WTC);
 
     /* Probe for SDMAC version */
     for (pass = 0; pass < 6; pass++) {
@@ -1151,6 +1155,9 @@ get_sdmac_version(void)
         if (flag_debug)
             printf(">> SDMAC_WTC wvalue=%08x rvalue=%08x\n", wvalue, rvalue);
 
+        if (rvalue == origval)
+            origval_count++;
+
         if (rvalue == wvalue) {
             /* At least some bits of this register are read-only in SDMAC */
             if ((wvalue != 0x00000000) && (wvalue != 0xffffffff)) {
@@ -1170,6 +1177,10 @@ get_sdmac_version(void)
             sdmac_fail_reason = "bit corruption in WTC register";
             return (0);
         }
+    }
+    if (origval_count > 4) {
+        sdmac_fail_reason = "constant WTC register";
+        return (0);
     }
     return (sdmac_version);  // SDMAC-02 WTC bits 0-23 are writable
 }
@@ -1257,6 +1268,7 @@ show_dmac_version(void)
             return (0);
         default:
             printf("SDMAC was not detected: %s\n", sdmac_fail_reason);
+            no_sdmac_detected = 1;
             return (1);
     }
 }
@@ -1944,6 +1956,9 @@ test_sdmac_access(void)
 {
     int errs = 0;
 
+    if (no_sdmac_detected)
+        return (0);
+
     printf("SDMAC test:   ");
     fflush(stdout);
 
@@ -1972,6 +1987,9 @@ test_wdc_access(void)
     uint8_t covalue;
     uint8_t crvalue;
     int errs = 0;
+
+    if (no_sdmac_detected)
+        return (0);
 
     printf("WDC test:     ");
     fflush(stdout);
@@ -2625,6 +2643,9 @@ usage:
         if (flag_force_test == 0)
             goto finish;
     }
+
+    if (no_sdmac_detected)
+        goto finish;
 
     do {
         pass++;
