@@ -24,6 +24,7 @@ const char *version = "\0$VER: SDMAC " VER " ("__DATE__") © Chris Hooper";
 #include <clib/expansion_protos.h>
 #include <inline/exec.h>
 #include <inline/expansion.h>
+#include <dos/dos.h>
 #include <proto/dos.h>
 #include <exec/memory.h>
 #include <exec/interrupts.h>
@@ -2536,7 +2537,7 @@ main(int argc, char **argv)
     int flag_force_test = 0;
     int arg;
     uint pass = 0;
-    uint exit_status = 0;
+    uint exit_status = RETURN_OK;
 
     for (arg = 1; arg < argc; arg++) {
         char *ptr = argv[arg];
@@ -2566,7 +2567,7 @@ main(int argc, char **argv)
                         if ((sscanf(arg1, "%x%n", &addr, &pos) != 1) ||
                             (arg1[pos] != '\0') || (addr > 0xff)) {
                             printf("Invalid address %s for -%s\n", arg1, ptr);
-                            exit(1);
+                            exit(RETURN_ERROR);
                         }
                         if ((argc <= arg + 2) || (*arg2 == '-')) {
                             /* read */
@@ -2579,7 +2580,7 @@ main(int argc, char **argv)
                         if ((sscanf(arg2, "%x%n", &val, &pos) != 1) ||
                             (arg2[pos] != '\0') || (val > 0xff)) {
                             printf("Invalid data %s for -%s\n", arg2, ptr);
-                            exit(1);
+                            exit(RETURN_ERROR);
                         }
 
                         /* write */
@@ -2600,7 +2601,7 @@ main(int argc, char **argv)
                         break;
                     case 'v':
                         printf("%s\n", version + 7);
-                        exit(0);
+                        exit(RETURN_OK);
                     default:
                         goto usage;
                 }
@@ -2616,7 +2617,7 @@ usage:
                    "    -s Display raw SDMAC registers\n"
                    "    -t Force tests to run\n"
                    "    -v Display program version\n", version + 7);
-            exit(1);
+            exit(RETURN_ERROR);
         }
     }
     BERR_DSACK_SAVE();
@@ -2653,12 +2654,12 @@ usage:
             (test_ramsey_access() +
              test_sdmac_access() +
              test_wdc_access() > 0)) {
-            exit_status = 1;
+            exit_status = RETURN_ERROR;
             break;
         }
         if (probe_scsi_bus &&
             probe_scsi()) {
-            exit_status = 1;
+            exit_status = RETURN_ERROR;
             break;
         }
         if (do_wdc_reset) {
@@ -2674,7 +2675,7 @@ usage:
         }
         if (is_user_abort()) {
             printf("^C Abort\n");
-            exit_status = 1;
+            exit_status = RETURN_ERROR;
             break;
         }
     } while (loop_until_failure);
