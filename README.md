@@ -7,7 +7,7 @@ talk through the SDMAC to read WD33C93A registers and identify that
 chip and configuration as well. Ramsey version and configuration are
 also reported.
 
-The code can be compiled using VSCode with dev containers and Docker, or can be built using Bebbo's gcc Amiga cross-compiler in a local Linux environment.
+The code can be compiled using VSCode with dev containers and Docker, or can be built using Bebbo's gcc Amiga cross-compiler in a local Linux environment. See [CONTRIBUTING.md](CONTRIBUTING.md) for build and release instructions.
 
 ## Usage
 `> sdmac [options]`
