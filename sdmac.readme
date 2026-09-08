@@ -1,0 +1,18 @@
+Short:        A3000 SDMAC and WD33C93A test utility
+Author:       Chris Hooper
+Uploader:     Chris Hooper
+Type:         util/misc
+Version:      @VERSION@
+Architecture: m68k-amigaos
+URL:          https://github.com/cdhooper/amiga_sdmac_test
+
+SDMAC @VERSION@ (@DATE@) - Chris Hooper
+Options:
+    -d Debug output
+    -L Loop tests until failure
+    -p probe SCSI bus (not well-tested)
+    -R reset WD SCSI Controller
+    -r [<reg> [<value>]] Display/change WDC registers
+    -s Display raw SDMAC registers
+    -t Force tests to run
+    -v Display program version

@@ -19,6 +19,13 @@ jobs:
         run: echo "version=${GITHUB_REF#refs/tags/release_}" >> $GITHUB_OUTPUT
       - name: Invoke Makefile
         run: make all lha adf zip VER=${{ steps.version.outputs.version }}
+      - name: Prepare Aminet package
+        run: |
+          mkdir aminet
+          version="${{ steps.version.outputs.version }}"
+          release_date="$(LC_ALL=C date -u '+%b %e %Y')"
+          cp "sdmac_${version}.lha" aminet/sdmac.lha
+          sed -e "s/@VERSION@/${version}/g" -e "s/@DATE@/${release_date}/g" sdmac.readme > aminet/sdmac.readme
       - name: upload build artifacts
         uses: actions/upload-artifact@v6
         with:
@@ -27,6 +34,8 @@ jobs:
             *.lha
             *.adf
             *.zip
+            aminet/sdmac.lha
+            aminet/sdmac.readme
           if-no-files-found: error
       - name: Create a new GitHub release
         uses: softprops/action-gh-release@v3
@@ -39,3 +48,10 @@ jobs:
               *.lha
               *.adf
               *.zip
+      - name: Publish to Aminet
+        uses: sidick/aminet-release-action@v1
+        with:
+          filename: aminet/sdmac.lha
+          readme: aminet/sdmac.readme
+          category: util/misc
+          uploader-email: ${{ secrets.AMINET_UPLOADER_EMAIL }}
