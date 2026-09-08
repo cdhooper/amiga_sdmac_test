@@ -1,6 +1,6 @@
 /*
- * SDMAC  Version 0.9 2024-10-17
- * -----------------------------
+ * SDMAC
+ * -----
  * Utility to inspect and test an Amiga 3000's Super DMAC (SDMAC) and
  * WD SCSI controller for correct configuration and operation.
  *
@@ -24,6 +24,7 @@ const char *version = "\0$VER: SDMAC " VER " ("__DATE__") © Chris Hooper";
 #include <clib/expansion_protos.h>
 #include <inline/exec.h>
 #include <inline/expansion.h>
+#include <dos/dos.h>
 #include <proto/dos.h>
 #include <exec/memory.h>
 #include <exec/interrupts.h>
@@ -211,6 +212,7 @@ typedef unsigned int uint;
 
 static uint8_t     irq_disabled      = 0;
 static uint8_t     flag_debug        = 0;
+static uint8_t     no_sdmac_detected = 0;
 static const char *sdmac_fail_reason = "";
 static uint        wdc_khz;
 
@@ -1113,9 +1115,11 @@ get_sdmac_version(void)
 {
     uint32_t ovalue;
     uint32_t rvalue;
+    uint32_t origval;
     uint8_t  istr = *ADDR8(SDMAC_ISTR);
     uint     pass;
     uint     sdmac_version = 2;
+    uint     origval_count = 0;
 
     sdmac_fail_reason = "";
     if ((istr & SDMAC_ISTR_FIFOE) && (istr & SDMAC_ISTR_FIFOF)) {
@@ -1125,6 +1129,7 @@ get_sdmac_version(void)
         return (0);  // Can not be both full and empty
     }
 
+    origval = *ADDR32(SDMAC_WTC);
 
     /* Probe for SDMAC version */
     for (pass = 0; pass < 6; pass++) {
@@ -1139,17 +1144,20 @@ get_sdmac_version(void)
         }
 
         INTERRUPTS_DISABLE();
-        ovalue = *ADDR32(SDMAC_WTC);
-        *ADDR32(SDMAC_WTC) = wvalue;
+        ovalue = *ADDR32(SDMAC_WTC_ALT);
+        *ADDR32(SDMAC_WTC_ALT) = wvalue;
 #define FORCE_READ(x) asm volatile ("" : : "r" (x));
         /* Push out write and buffer something else on the bus */
         (void) *ADDR32(RAMSEY_VER);
         rvalue = *ADDR32(SDMAC_WTC);
-        *ADDR32(SDMAC_WTC) = ovalue;
+        *ADDR32(SDMAC_WTC_ALT) = ovalue;
         INTERRUPTS_ENABLE();
 
         if (flag_debug)
             printf(">> SDMAC_WTC wvalue=%08x rvalue=%08x\n", wvalue, rvalue);
+
+        if (rvalue == origval)
+            origval_count++;
 
         if (rvalue == wvalue) {
             /* At least some bits of this register are read-only in SDMAC */
@@ -1170,6 +1178,10 @@ get_sdmac_version(void)
             sdmac_fail_reason = "bit corruption in WTC register";
             return (0);
         }
+    }
+    if (origval_count > 4) {
+        sdmac_fail_reason = "constant WTC register";
+        return (0);
     }
     return (sdmac_version);  // SDMAC-02 WTC bits 0-23 are writable
 }
@@ -1257,6 +1269,7 @@ show_dmac_version(void)
             return (0);
         default:
             printf("SDMAC was not detected: %s\n", sdmac_fail_reason);
+            no_sdmac_detected = 1;
             return (1);
     }
 }
@@ -1944,6 +1957,9 @@ test_sdmac_access(void)
 {
     int errs = 0;
 
+    if (no_sdmac_detected)
+        return (0);
+
     printf("SDMAC test:   ");
     fflush(stdout);
 
@@ -1972,6 +1988,9 @@ test_wdc_access(void)
     uint8_t covalue;
     uint8_t crvalue;
     int errs = 0;
+
+    if (no_sdmac_detected)
+        return (0);
 
     printf("WDC test:     ");
     fflush(stdout);
@@ -2518,7 +2537,7 @@ main(int argc, char **argv)
     int flag_force_test = 0;
     int arg;
     uint pass = 0;
-    uint exit_status = 0;
+    uint exit_status = RETURN_OK;
 
     for (arg = 1; arg < argc; arg++) {
         char *ptr = argv[arg];
@@ -2548,7 +2567,7 @@ main(int argc, char **argv)
                         if ((sscanf(arg1, "%x%n", &addr, &pos) != 1) ||
                             (arg1[pos] != '\0') || (addr > 0xff)) {
                             printf("Invalid address %s for -%s\n", arg1, ptr);
-                            exit(1);
+                            exit(RETURN_ERROR);
                         }
                         if ((argc <= arg + 2) || (*arg2 == '-')) {
                             /* read */
@@ -2561,7 +2580,7 @@ main(int argc, char **argv)
                         if ((sscanf(arg2, "%x%n", &val, &pos) != 1) ||
                             (arg2[pos] != '\0') || (val > 0xff)) {
                             printf("Invalid data %s for -%s\n", arg2, ptr);
-                            exit(1);
+                            exit(RETURN_ERROR);
                         }
 
                         /* write */
@@ -2582,7 +2601,7 @@ main(int argc, char **argv)
                         break;
                     case 'v':
                         printf("%s\n", version + 7);
-                        exit(0);
+                        exit(RETURN_OK);
                     default:
                         goto usage;
                 }
@@ -2598,7 +2617,7 @@ usage:
                    "    -s Display raw SDMAC registers\n"
                    "    -t Force tests to run\n"
                    "    -v Display program version\n", version + 7);
-            exit(1);
+            exit(RETURN_ERROR);
         }
     }
     BERR_DSACK_SAVE();
@@ -2626,18 +2645,21 @@ usage:
             goto finish;
     }
 
+    if (no_sdmac_detected)
+        goto finish;
+
     do {
         pass++;
         if (flag_force_test &&
             (test_ramsey_access() +
              test_sdmac_access() +
              test_wdc_access() > 0)) {
-            exit_status = 1;
+            exit_status = RETURN_ERROR;
             break;
         }
         if (probe_scsi_bus &&
             probe_scsi()) {
-            exit_status = 1;
+            exit_status = RETURN_ERROR;
             break;
         }
         if (do_wdc_reset) {
@@ -2653,7 +2675,7 @@ usage:
         }
         if (is_user_abort()) {
             printf("^C Abort\n");
-            exit_status = 1;
+            exit_status = RETURN_ERROR;
             break;
         }
     } while (loop_until_failure);
