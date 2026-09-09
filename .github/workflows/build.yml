@@ -7,7 +7,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: ghcr.io/mbtaylor1982/container-amiga-gcc-amitools:latest
+    container: ghcr.io/reinauer/container-amiga-gcc:latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v5

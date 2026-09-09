@@ -3,9 +3,8 @@
 {
 	"name": "amiga-gcc-amitools",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"image": "ghcr.io/mbtaylor1982/container-amiga-gcc-amitools:latest",
-
-	// Features to add to the dev container. More info: https://containers.dev/features.
+	"image": "ghcr.io/reinauer/container-amiga-gcc:latest",
+	
 	// "features": {},
 
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
