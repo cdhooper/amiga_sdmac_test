@@ -20,6 +20,17 @@ make all lha adf zip VER=1.2
 This produces versioned `.lha`, `.adf`, and `.zip` files in the repository
 root.
 
+## GitHub Actions dependencies
+
+This repository uses Renovate to keep GitHub Actions dependencies current.
+To enable updates, install the [Renovate GitHub App](https://github.com/apps/renovate)
+for the repository. Renovate reads [`renovate.json`](renovate.json), creates a
+dependency dashboard, and opens pull requests for available action updates.
+
+Action updates are grouped and labeled `dependencies` and `github-actions`.
+Review and merge those pull requests through the normal workflow; Renovate does
+not merge them automatically.
+
 ## Releases
 
 Release builds are triggered by pushing a tag whose name starts with
